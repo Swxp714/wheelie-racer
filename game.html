@@ -728,16 +728,35 @@ function startSolo() {
   document.getElementById('start-screen').style.display = 'flex';
 }
 
+const iceConfig = {
+  iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+    { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+    { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
+  ]
+};
+
 function createRoom() {
   const status = document.getElementById('lobby-status');
   status.textContent = 'CREATING ROOM...';
 
   const roomCode = genRoomCode();
-  peer = new Peer('wheelie-' + roomCode);
+    iceServers: [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' },
+      { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+      { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+      { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
+    ]
+  };
+
+  peer = new Peer('wheelie-' + roomCode, { config: iceConfig });
   isHost = true;
 
   peer.on('open', () => {
-    status.innerHTML = `ROOM CODE: <span style="color:#FFD600;font-size:16px">${roomCode}</span><br><br>WAITING FOR PLAYER...`;
+    status.innerHTML = `ROOM CODE: <span style="color:#FFD600;font-size:20px">${roomCode}</span><br><br>WAITING FOR PLAYER...<br><span style="font-size:8px;color:#666">Share this code with your friend!</span>`;
   });
 
   peer.on('connection', (connection) => {
@@ -764,7 +783,7 @@ function joinRoom() {
   const status = document.getElementById('lobby-status');
   status.textContent = 'CONNECTING...';
 
-  peer = new Peer();
+  peer = new Peer(undefined, { config: iceConfig });
   isHost = false;
 
   peer.on('open', () => {
