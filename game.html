@@ -984,8 +984,9 @@ function gameLoop() {
         if (trickScore > 0) {
           trickName = tricks.join(' + ');
           score += trickScore;
-          hudTaunt.textContent = `${trickName} +${trickScore}`;
+          // 즉시 이전 텍스트 교체
           hudTaunt.className = 'hud-taunt';
+          hudTaunt.innerHTML = `${trickName}<br><span style="font-size:${Math.min(24, 14 + trickScore/500)}px">+${trickScore}</span>`;
           if (trickScore >= 10000) {
             hudTaunt.classList.add('trick-epic');
             hudTaunt.style.color = '#E040A0';
@@ -1049,7 +1050,18 @@ function gameLoop() {
       const min = Math.floor(sec / 60);
       const secR = sec % 60;
       const timeStr = `${String(min).padStart(2,'0')}:${String(secR).padStart(2,'0')}:${String(Math.floor(msR/10)).padStart(2,'0')}`;
-      const timeColor = airTime < 2 ? '#4CAF50' : airTime < 4 ? '#FFD600' : '#E53935';
+      // 시간에 따라 색 그라데이션 (초록→노랑→빨강)
+      let tr, tg, tb;
+      if (airTime < 2) {
+        const t = airTime / 2;
+        tr = Math.floor(76 + (255-76)*t); tg = Math.floor(175 + (214-175)*t); tb = Math.floor(80 + (0-80)*t);
+      } else if (airTime < 4) {
+        const t = (airTime-2) / 2;
+        tr = Math.floor(255 + (229-255)*t); tg = Math.floor(214 + (57-214)*t); tb = Math.floor(0 + (53-0)*t);
+      } else {
+        tr = 229; tg = 57; tb = 53;
+      }
+      const timeColor = `rgb(${tr},${tg},${tb})`;
       hudTaunt.innerHTML = `STUNT!<br><span style="font-size:12px;color:${timeColor}">${timeStr}</span>`;
       hudTaunt.style.color = '#FFD600';
       hudTaunt.style.display = 'block';
