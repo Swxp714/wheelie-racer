@@ -722,7 +722,7 @@ function genRoomCode() {
   return Math.random().toString(36).substring(2, 8).toUpperCase();
 }
 
-window.startSolo = function() {
+function startSolo() {
   isMultiplayer = false;
   document.getElementById('lobby-screen').style.display = 'none';
   document.getElementById('start-screen').style.display = 'flex';
@@ -738,20 +738,11 @@ const iceConfig = {
   ]
 };
 
-window.createRoom = function() {
+function createRoom() {
   const status = document.getElementById('lobby-status');
   status.textContent = 'CREATING ROOM...';
 
   const roomCode = genRoomCode();
-    iceServers: [
-      { urls: 'stun:stun.l.google.com:19302' },
-      { urls: 'stun:stun1.l.google.com:19302' },
-      { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
-      { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
-      { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
-    ]
-  };
-
   peer = new Peer('wheelie-' + roomCode, { config: iceConfig });
   isHost = true;
 
@@ -776,7 +767,7 @@ window.createRoom = function() {
   });
 }
 
-window.joinRoom = function() {
+function joinRoom() {
   const code = document.getElementById('room-input').value.trim().toUpperCase();
   if (!code) return;
 
@@ -1828,7 +1819,7 @@ function respawn() {
 // ============================================================
 //  START
 // ============================================================
-window.startGame = function() {
+function startGame() {
   document.getElementById('start-screen').style.display = 'none';
   gameStarted = true;
   clock.start();
@@ -1841,6 +1832,12 @@ createAIRacers();
 for (let i = 0; i < SEGS_AHEAD; i++) createSegment(lastSegZ + SEG_LEN);
 initMediaPipe();
 gameLoop();
+
+// onclick에서 접근 가능하게
+window.startSolo = startSolo;
+window.createRoom = createRoom;
+window.joinRoom = joinRoom;
+window.startGame = startGame;
 </script>
 </body>
 </html>
