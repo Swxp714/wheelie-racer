@@ -1,0 +1,1539 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WHEELIE RACER</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { overflow:hidden; background:#000; font-family:'Press Start 2P',monospace; }
+  #game-canvas { display:block; width:100vw; height:100vh; }
+
+  /* HUD */
+  #hud {
+    position:fixed; top:0; left:0; width:100%; height:100%;
+    pointer-events:none; z-index:10;
+  }
+  .hud-score {
+    position:absolute; top:20px; left:24px;
+    font-size:18px; color:#FFD600;
+    text-shadow: 2px 2px 0 #000, 4px 4px 0 rgba(0,0,0,0.3);
+  }
+  .hud-speed {
+    position:absolute; top:20px; right:24px;
+    font-size:14px; color:#fff;
+    text-shadow: 2px 2px 0 #000;
+  }
+  .hud-wheelie-label {
+    position:absolute; bottom:80px; right:24px;
+    font-size:10px; color:#fff;
+    text-shadow: 1px 1px 0 #000;
+  }
+  .hud-gauge {
+    position:absolute; bottom:50px; right:24px;
+    width:200px; height:16px;
+    background:#222244; border:2px solid #333366;
+  }
+  .hud-gauge-fill {
+    height:100%; width:0%; background:#4CAF50;
+    transition: width 0.1s, background-color 0.2s;
+  }
+  .hud-status {
+    position:absolute; top:50px; left:24px;
+    font-size:8px; color:#4CAF50;
+    text-shadow: 1px 1px 0 #000;
+  }
+  .hud-death {
+    position:absolute; top:50%; left:50%;
+    transform:translate(-50%,-50%);
+    font-size:48px; color:#E53935;
+    text-shadow: 4px 4px 0 #000, 8px 8px 0 rgba(0,0,0,0.3);
+    display:none;
+  }
+  .hud-taunt {
+    position:absolute; top:60%; left:50%;
+    transform:translate(-50%,-50%);
+    font-size:24px; color:#7E57C2;
+    text-shadow: 3px 3px 0 #000;
+    display:none;
+    transition: font-size 0.1s;
+  }
+  @keyframes trickFlash {
+    0%,100% { opacity:1; }
+    50% { opacity:0.3; }
+  }
+  @keyframes trickPulse {
+    0%,100% { transform:translate(-50%,-50%) scale(1); }
+    25% { transform:translate(-50%,-50%) scale(1.4); }
+    50% { transform:translate(-50%,-50%) scale(0.9); }
+    75% { transform:translate(-50%,-50%) scale(1.2); }
+  }
+  .trick-small { font-size:20px; animation:none; }
+  .trick-mid { font-size:28px; animation:none; }
+  .trick-big { font-size:36px; animation:trickFlash 0.3s infinite; }
+  .trick-epic { font-size:48px; animation:trickPulse 0.5s infinite; }
+  .hud-controls {
+    position:absolute; bottom:20px; left:24px;
+    font-size:7px; color:#8888AA; line-height:2;
+    text-shadow: 1px 1px 0 #000;
+  }
+
+  /* 웹캠 미리보기 */
+  #webcam-wrap {
+    position:fixed; bottom:16px; left:16px;
+    width:160px; height:120px;
+    border:2px solid #333366;
+    overflow:hidden; z-index:20;
+    background:#000;
+  }
+  #webcam { width:100%; height:100%; object-fit:cover; transform:scaleX(-1); }
+
+  /* 시작 화면 */
+  #start-screen {
+    position:fixed; inset:0; z-index:100;
+    background:#1a1a2e;
+    display:flex; flex-direction:column;
+    align-items:center; justify-content:center;
+    text-align:center;
+  }
+  #start-screen h1 {
+    font-size:48px; color:#FFD600;
+    text-shadow: 4px 4px 0 #E53935, 8px 8px 0 rgba(0,0,0,0.4);
+    margin-bottom:24px;
+  }
+  #start-screen p { font-size:10px; color:#8888AA; line-height:2.5; margin-bottom:32px; }
+  #start-screen p b { color:#FFD600; }
+  #start-btn {
+    font-family:'Press Start 2P',monospace;
+    font-size:14px; padding:16px 40px;
+    background:#E53935; color:#fff; border:none;
+    cursor:pointer; pointer-events:auto;
+    text-shadow: 2px 2px 0 rgba(0,0,0,0.3);
+  }
+  #start-btn:hover { background:#FFD600; color:#1a1a2e; }
+</style>
+</head>
+<body>
+
+<!-- 시작 화면 -->
+<div id="start-screen">
+  <h1>WHEELIE<br>RACER</h1>
+  <p>
+    <b>FIST</b> = ACCELERATE &nbsp; <b>OPEN HAND</b> = BRAKE<br>
+    <b>RAISE HANDS</b> = WHEELIE (speed UP)<br>
+    <b>TILT HANDS</b> = STEER<br>
+    <b>MIDDLE FINGER</b> = TAUNT!<br>
+    <b>V-SIGN</b> = SMOKE (5s later: FLICK!)<br><br>
+    KEYBOARD: WASD + SPACE:WHEELIE/FLIP<br>
+    SHIFT:REVERSE FLIP + F:TAUNT + V:SMOKE
+  </p>
+  <button id="start-btn" onclick="startGame()">START</button>
+</div>
+
+<!-- HUD -->
+<div id="hud">
+  <div class="hud-score" id="hud-score">SCORE: 0</div>
+  <div class="hud-speed" id="hud-speed">0 km/h</div>
+  <div class="hud-wheelie-label" id="hud-wlabel">WHEELIE: 0%</div>
+  <div class="hud-gauge"><div class="hud-gauge-fill" id="hud-gauge"></div></div>
+  <div class="hud-status" id="hud-status">LOADING...</div>
+  <div class="hud-death" id="hud-death">WRECKED!</div>
+  <div class="hud-taunt" id="hud-taunt">* TAUNT! *</div>
+  <div class="hud-taunt" id="hud-smoke" style="display:none;color:#FB8C00;top:55%">SMOKING...</div>
+  <div class="hud-controls">WASD SPACE:WHEELIE/FLIP SHIFT:REVERSE F:TAUNT V:SMOKE</div>
+</div>
+
+<!-- 웹캠 -->
+<div id="webcam-wrap"><video id="webcam" autoplay playsinline></video></div>
+
+<!-- Three.js -->
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+
+<!-- MediaPipe Hands -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+
+<script>
+// ============================================================
+//  WHEELIE RACER - Three.js + MediaPipe
+// ============================================================
+
+// === GLOBALS ===
+let scene, camera, renderer, clock;
+let bike, bikeGroup, riderGroup, bikeBodyGroup;
+let trackSegments = [];
+let obstacles = [];
+let coins = [];
+let ramps = [];
+let gameStarted = false;
+
+// 물리
+let speed = 0;
+let maxSpeed = 40;
+let accel = 14;
+let brakeForce = 22;
+let decel = 4;
+let wheelieAngle = 0;
+let wheelieTarget = 0;
+let wheelieMult = 1;
+let leanAngle = 0;
+let steerVal = 0;
+let isDead = false;
+let deathTimer = 0;
+let score = 0;
+let bikeX = 0;
+let bikeZ = 0;
+
+// 점프
+let jumpY = 0;
+let jumpVel = 0;
+let isJumping = false;
+
+// 도발
+let tauntCD = 0;
+let tauntTimer = 0;
+
+// 래그돌 (사망 시 날아가기)
+let ragdollParts = [];
+let ragdollActive = false;
+
+// 담배 시스템
+let smokeState = 'idle'; // idle → smoking → canFlick → idle
+let smokeTimer = 0;
+let cigMesh = null;      // 1인칭 담배
+let cig3rdMesh = null;   // 3인칭 담배 (라이더 입에)
+let cigSmoke = [];
+let flickCig = null;
+
+// 뻐큐 모션
+let tauntHandMesh = null;
+let tauntHandTimer = 0;
+let tauntLookBack = false;
+
+// 백플립 (점프대 + 고속 + 윌리)
+let backflipActive = false;
+let backflipAngle = 0;
+let backflipCamMode = false;
+let airTime = 0; // 공중 체공 시간 (초)
+
+// AI 레이서
+let aiRacers = [];
+const AI_COUNT = 3;
+
+// 트랙
+const SEG_LEN = 30;
+const SEGS_AHEAD = 12;
+const SEGS_BEHIND = 3;
+let lastSegZ = -SEG_LEN;
+let segCount = 0;
+
+// 입력
+let keys = {};
+let gesture = { steer:0, wheelieH:0, fist:false, open:false, taunt:false, vsign:false, detected:false };
+let handReady = false;
+
+// === DOM ===
+const hudScore = document.getElementById('hud-score');
+const hudSpeed = document.getElementById('hud-speed');
+const hudWLabel = document.getElementById('hud-wlabel');
+const hudGauge = document.getElementById('hud-gauge');
+const hudStatus = document.getElementById('hud-status');
+const hudDeath = document.getElementById('hud-death');
+const hudTaunt = document.getElementById('hud-taunt');
+
+
+// ============================================================
+//  THREE.JS SETUP
+// ============================================================
+function initThree() {
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x85D2FE);
+  scene.fog = new THREE.Fog(0x85D2FE, 80, 200);
+
+  camera = new THREE.PerspectiveCamera(75, innerWidth/innerHeight, 0.1, 300);
+  camera.position.set(0, 2.2, 0);
+  camera.lookAt(0, 1.5, 10);
+
+  renderer = new THREE.WebGLRenderer({ antialias:false });
+  renderer.setSize(innerWidth, innerHeight);
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.BasicShadowMap;
+  document.body.prepend(renderer.domElement);
+  renderer.domElement.id = 'game-canvas';
+
+  // 조명
+  const amb = new THREE.AmbientLight(0xffffff, 0.6);
+  scene.add(amb);
+
+  const sun = new THREE.DirectionalLight(0xffffff, 0.8);
+  sun.position.set(10, 20, 10);
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(1024, 1024);
+  sun.shadow.camera.near = 0.5;
+  sun.shadow.camera.far = 100;
+  sun.shadow.camera.left = -30;
+  sun.shadow.camera.right = 30;
+  sun.shadow.camera.top = 30;
+  sun.shadow.camera.bottom = -30;
+  scene.add(sun);
+
+  clock = new THREE.Clock();
+
+  window.addEventListener('resize', () => {
+    camera.aspect = innerWidth / innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(innerWidth, innerHeight);
+  });
+}
+
+
+// ============================================================
+//  VOXEL HELPERS
+// ============================================================
+function box(w, h, d, clr) {
+  const g = new THREE.BoxGeometry(w, h, d);
+  const m = new THREE.MeshLambertMaterial({ color: clr, flatShading: true });
+  const mesh = new THREE.Mesh(g, m);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  return mesh;
+}
+
+
+// ============================================================
+//  BIKE (복셀 바이크)
+// ============================================================
+let fpvGroup;
+
+function makeBikeModel(bodyColor) {
+  const g = new THREE.Group();
+  g.add((() => { const b = box(0.8,0.4,1.8, bodyColor); b.position.y=0.6; return b; })());
+  g.add((() => { const s = box(0.6,0.2,0.6, 0x333333); s.position.set(0,0.9,-0.3); return s; })());
+  g.add((() => { const h = box(1.0,0.15,0.15, 0xCCCCCC); h.position.set(0,1.0,0.7); return h; })());
+  g.add((() => { const e = box(0.5,0.3,0.5, 0x444444); e.position.set(0,0.35,0); return e; })());
+  g.add((() => { const w = box(0.3,0.7,0.7, 0x222222); w.position.set(0,0.35,-0.7); return w; })());
+  g.add((() => { const w = box(0.3,0.7,0.7, 0x222222); w.position.set(0,0.35,0.8); return w; })());
+  g.add((() => { const x = box(0.15,0.15,0.8, 0x888888); x.position.set(0.35,0.3,-0.4); return x; })());
+  return g;
+}
+
+function makeRiderModel(shirtColor, helmetColor) {
+  const g = new THREE.Group();
+  g.add((() => { const t = box(0.5,0.7,0.35, shirtColor); t.position.set(0,1.6,-0.1); return t; })());
+  g.add((() => { const h = box(0.4,0.45,0.4, 0xFFCC80); h.position.set(0,2.25,-0.1); return h; })());
+  g.add((() => { const h = box(0.46,0.3,0.46, helmetColor); h.position.set(0,2.45,-0.1); return h; })());
+  g.add((() => { const v = box(0.47,0.12,0.2, 0x222222); v.position.set(0,2.3,0.12); return v; })());
+  const aL = box(0.2,0.55,0.2, shirtColor); aL.position.set(-0.4,1.45,0.3); aL.rotation.x=-0.6; g.add(aL);
+  const aR = box(0.2,0.55,0.2, shirtColor); aR.position.set(0.4,1.45,0.3); aR.rotation.x=-0.6; g.add(aR);
+  g.add((() => { const h = box(0.18,0.18,0.18, 0xFFCC80); h.position.set(-0.45,1.1,0.6); return h; })());
+  g.add((() => { const h = box(0.18,0.18,0.18, 0xFFCC80); h.position.set(0.45,1.1,0.6); return h; })());
+  const lL = box(0.22,0.6,0.22, 0x333333); lL.position.set(-0.25,0.95,-0.3); lL.rotation.x=0.4; g.add(lL);
+  const lR = box(0.22,0.6,0.22, 0x333333); lR.position.set(0.25,0.95,-0.3); lR.rotation.x=0.4; g.add(lR);
+  g.add((() => { const f = box(0.2,0.15,0.3, 0x222222); f.position.set(-0.25,0.55,-0.15); return f; })());
+  g.add((() => { const f = box(0.2,0.15,0.3, 0x222222); f.position.set(0.25,0.55,-0.15); return f; })());
+  return g;
+}
+
+function createBike() {
+  bikeGroup = new THREE.Group();
+
+  // 바이크 본체 (래그돌 시 따로 날아감)
+  bikeBodyGroup = makeBikeModel(0xF95858);
+  bikeGroup.add(bikeBodyGroup);
+
+  // 라이더 (래그돌 시 따로 날아감)
+  riderGroup = makeRiderModel(0x1E88E5, 0xE53935);
+  bikeGroup.add(riderGroup);
+
+  scene.add(bikeGroup);
+  bike = bikeGroup;
+
+  // === 1인칭 핸들바 (카메라 자식, 화면 하단에 고정) ===
+  fpvGroup = new THREE.Group();
+  fpvGroup.renderOrder = 999;
+
+  // 카메라 로컬: z 마이너스 = 카메라 앞
+  const fy = -0.62, fz = -1.2;
+  // 핸들바
+  fpvGroup.add((() => { const b = box(2.0,0.08,0.08, 0xCCCCCC); b.position.set(0, fy, fz); return b; })());
+  // 그립
+  fpvGroup.add((() => { const g = box(0.26,0.15,0.15, 0x222222); g.position.set(-0.9, fy, fz); return g; })());
+  fpvGroup.add((() => { const g = box(0.26,0.15,0.15, 0x222222); g.position.set(0.9, fy, fz); return g; })());
+  // 손
+  fpvGroup.add((() => { const h = box(0.2,0.2,0.2, 0xFFCC80); h.position.set(-0.75, fy+0.08, fz+0.1); return h; })());
+  fpvGroup.add((() => { const h = box(0.2,0.2,0.2, 0xFFCC80); h.position.set(0.75, fy+0.08, fz+0.1); return h; })());
+  // 팔
+  fpvGroup.add((() => { const a = box(0.14,0.14,0.55, 0x1E88E5); a.position.set(-0.6, fy+0.02, fz+0.5); a.rotation.y=-0.2; return a; })());
+  fpvGroup.add((() => { const a = box(0.14,0.14,0.55, 0x1E88E5); a.position.set(0.6, fy+0.02, fz+0.5); a.rotation.y=0.2; return a; })());
+  // 계기판
+  fpvGroup.add((() => { const d = box(0.35,0.22,0.12, 0x333333); d.position.set(0, fy+0.15, fz-0.06); return d; })());
+  fpvGroup.add((() => { const s = box(0.24,0.12,0.01, 0x4CAF50); s.position.set(0, fy+0.19, fz-0.12); return s; })());
+  // 미러
+  fpvGroup.add((() => { const m = box(0.16,0.1,0.05, 0x888888); m.position.set(-1.0, fy+0.18, fz); return m; })());
+  fpvGroup.add((() => { const m = box(0.16,0.1,0.05, 0x888888); m.position.set(1.0, fy+0.18, fz); return m; })());
+
+  camera.add(fpvGroup);
+  scene.add(camera);
+}
+
+// === AI 레이서 ===
+function createAIRacers() {
+  const colors = [
+    { bike: 0x1E88E5, shirt: 0xE53935, helmet: 0x1E88E5 },
+    { bike: 0x43A047, shirt: 0xFB8C00, helmet: 0x43A047 },
+    { bike: 0xFFD600, shirt: 0x7E57C2, helmet: 0xFFD600 },
+  ];
+  for (let i = 0; i < AI_COUNT; i++) {
+    const c = colors[i];
+    const aiGroup = new THREE.Group();
+    aiGroup.add(makeBikeModel(c.bike));
+    aiGroup.add(makeRiderModel(c.shirt, c.helmet));
+
+    const startX = (i - 1) * 2.5;
+    aiGroup.position.set(startX, 0, -5 - i * 3);
+    scene.add(aiGroup);
+
+    aiRacers.push({
+      group: aiGroup,
+      x: startX,
+      z: -5 - i * 3,
+      speed: 14 + Math.random() * 8,
+      targetX: startX,
+      wobbleTimer: Math.random() * 10,
+      wheelieAngle: 0,
+    });
+  }
+}
+
+
+// ============================================================
+//  TRACK (절차적 트랙)
+// ============================================================
+function createSegment(z) {
+  const seg = new THREE.Group();
+  seg.userData.zStart = z;
+
+  // 도로
+  const road = box(12, 0.2, SEG_LEN, 0x666677);
+  road.position.set(0, -0.1, z);
+  road.receiveShadow = true;
+  seg.add(road);
+
+  // 중앙선 (점선)
+  for (let i = -SEG_LEN/2 + 1; i < SEG_LEN/2; i += 3) {
+    const dash = box(0.2, 0.01, 1.5, 0xFFD600);
+    dash.position.set(0, 0.01, z + i);
+    seg.add(dash);
+  }
+
+  // 가장자리
+  const edgeL = box(0.25, 0.15, SEG_LEN, 0xFFFFFF);
+  edgeL.position.set(-6, 0.05, z);
+  seg.add(edgeL);
+  const edgeR = box(0.25, 0.15, SEG_LEN, 0xFFFFFF);
+  edgeR.position.set(6, 0.05, z);
+  seg.add(edgeR);
+
+  // 잔디
+  const grassL = box(30, 0.15, SEG_LEN, 0x4CAF50);
+  grassL.position.set(-21, -0.05, z);
+  grassL.receiveShadow = true;
+  seg.add(grassL);
+  const grassR = box(30, 0.15, SEG_LEN, 0x4CAF50);
+  grassR.position.set(21, -0.05, z);
+  grassR.receiveShadow = true;
+  seg.add(grassR);
+
+  // 나무
+  const treeCount = Math.floor(Math.random() * 3) + 1;
+  for (let i = 0; i < treeCount; i++) {
+    const side = Math.random() > 0.5 ? 1 : -1;
+    const tx = side * (8 + Math.random() * 8);
+    const tz = z + (Math.random() - 0.5) * SEG_LEN * 0.8;
+
+    const trunk = box(0.5, 2, 0.5, 0x8B5A2B);
+    trunk.position.set(tx, 1, tz);
+    trunk.castShadow = true;
+    seg.add(trunk);
+
+    const leaves = box(1.5, 1.5, 1.5, 0x388E3C);
+    leaves.position.set(tx, 2.5, tz);
+    leaves.castShadow = true;
+    seg.add(leaves);
+  }
+
+  segCount++;
+
+  // 장애물 (빈도 줄임: 6세그먼트마다 1~2개)
+  if (segCount > 3 && segCount % 6 === 0) {
+    const obsCount = Math.floor(Math.random() * 2) + 1;
+    for (let i = 0; i < obsCount; i++) {
+      const ox = (Math.random() - 0.5) * 9;
+      const oz = z + (Math.random() - 0.5) * SEG_LEN * 0.6;
+      const type = Math.random();
+
+      let obs;
+      if (type < 0.5) {
+        obs = box(0.5, 1, 0.5, 0xFB8C00);
+        obs.position.set(ox, 0.5, oz);
+      } else {
+        const carColor = [0xE53935,0x1E88E5,0xFFD600,0x43A047,0xFFFFFF,0x333333][Math.floor(Math.random()*6)];
+        obs = box(1.4, 1, 2.4, carColor);
+        obs.position.set(ox, 0.5, oz);
+        const roof = box(1.2, 0.5, 1.2, carColor); roof.position.y = 0.7; obs.add(roof);
+        for (const wx of [-0.6,0.6]) for (const wz of [-0.8,0.8]) {
+          const w = box(0.2,0.4,0.4, 0x222222); w.position.set(wx,-0.3,wz); obs.add(w);
+        }
+      }
+      obs.castShadow = true;
+      obs.userData.isObstacle = true;
+      obs.userData.hw = obs.geometry.parameters.width / 2 + 0.2;
+      obs.userData.hd = obs.geometry.parameters.depth / 2 + 0.2;
+      seg.add(obs);
+      obstacles.push(obs);
+    }
+  }
+
+  // 점프대 (3세그먼트마다, 3종류)
+  if (segCount > 2 && segCount % 3 === 0) {
+    const rx = (Math.random() - 0.5) * 5;
+    const rz = z + (Math.random() - 0.5) * SEG_LEN * 0.3;
+    const rampType = Math.random();
+    let ramp, rampSize;
+
+    if (rampType < 0.5) {
+      // 소형 점프대 (낮은 점프)
+      ramp = box(2.5, 0.3, 1.5, 0x888888);
+      ramp.rotation.x = -0.15;
+      ramp.userData.rampPower = 0;  // 소형
+      rampSize = 'S';
+    } else if (rampType < 0.85) {
+      // 중형 점프대 (보통 점프)
+      ramp = box(3, 0.6, 2, 0xFFD600);
+      ramp.rotation.x = -0.22;
+      const s1 = box(3, 0.05, 0.3, 0xE53935); s1.position.set(0, 0.32, 0.5); ramp.add(s1);
+      const s2 = box(3, 0.05, 0.3, 0xE53935); s2.position.set(0, 0.32, -0.5); ramp.add(s2);
+      ramp.userData.rampPower = 1;  // 중형
+      rampSize = 'M';
+    } else {
+      // 대형 점프대 (높은 점프, 스턴트용)
+      ramp = box(4, 1.0, 3, 0xE53935);
+      ramp.rotation.x = -0.3;
+      const s1 = box(4, 0.05, 0.4, 0xFFD600); s1.position.set(0, 0.52, 0.8); ramp.add(s1);
+      const s2 = box(4, 0.05, 0.4, 0xFFD600); s2.position.set(0, 0.52, 0); ramp.add(s2);
+      const s3 = box(4, 0.05, 0.4, 0xFFD600); s3.position.set(0, 0.52, -0.8); ramp.add(s3);
+      // 화살표 표시
+      const arrow = box(0.6, 0.06, 1, 0xFFFFFF); arrow.position.set(0, 0.53, 0); ramp.add(arrow);
+      ramp.userData.rampPower = 2;  // 대형
+      rampSize = 'L';
+    }
+
+    ramp.position.set(rx, ramp.geometry.parameters.height / 2, rz);
+    ramp.castShadow = true;
+    ramp.userData.isRamp = true;
+    ramp.userData.hw = ramp.geometry.parameters.width / 2 + 0.3;
+    ramp.userData.hd = ramp.geometry.parameters.depth / 2 + 0.3;
+    seg.add(ramp);
+    ramps.push(ramp);
+  }
+
+  // 코인 (2세그먼트마다 3~5개 줄)
+  if (segCount % 2 === 0) {
+    const cx = (Math.random() - 0.5) * 6;
+    const coinCount = Math.floor(Math.random() * 3) + 3;
+    for (let i = 0; i < coinCount; i++) {
+      const coin = box(0.4, 0.4, 0.4, 0xFFD600);
+      coin.position.set(cx, 1.2, z + i * 2.5 - coinCount);
+      coin.rotation.y = 0.785;
+      coin.castShadow = true;
+      coin.userData.isCoin = true;
+      seg.add(coin);
+      coins.push(coin);
+    }
+  }
+
+  scene.add(seg);
+  trackSegments.push(seg);
+  lastSegZ = z;
+}
+
+function updateTrack() {
+  // 앞쪽 생성
+  while (lastSegZ < bikeZ + SEGS_AHEAD * SEG_LEN) {
+    createSegment(lastSegZ + SEG_LEN);
+  }
+  // 뒤쪽 삭제
+  const cutoff = bikeZ - SEGS_BEHIND * SEG_LEN;
+  for (let i = trackSegments.length - 1; i >= 0; i--) {
+    const seg = trackSegments[i];
+    if (seg.userData.zStart < cutoff) {
+      scene.remove(seg);
+      // 장애물 리스트에서도 제거
+      seg.traverse(c => {
+        if (c.userData) {
+          if (c.userData.isObstacle) { const i = obstacles.indexOf(c); if (i>-1) obstacles.splice(i,1); }
+          if (c.userData.isRamp) { const i = ramps.indexOf(c); if (i>-1) ramps.splice(i,1); }
+          if (c.userData.isCoin) { const i = coins.indexOf(c); if (i>-1) coins.splice(i,1); }
+        }
+      });
+      trackSegments.splice(i, 1);
+    }
+  }
+}
+
+
+// ============================================================
+//  COLLISION
+// ============================================================
+function checkCollision() {
+  const bw = 0.5, bd = 0.9;
+  for (const obs of obstacles) {
+    if (!obs.userData.isObstacle) continue;
+    const wp = new THREE.Vector3();
+    obs.getWorldPosition(wp);
+    if (Math.abs(bikeX - wp.x) < bw + obs.userData.hw &&
+        Math.abs(bikeZ - wp.z) < bd + obs.userData.hd) {
+      return true;
+    }
+  }
+  return false;
+}
+
+
+// ============================================================
+//  MEDIAPIPE HANDS
+// ============================================================
+function initMediaPipe() {
+  // MediaPipe 미로드 시 키보드 모드로 바로 전환
+  if (typeof Hands === 'undefined' || typeof Camera === 'undefined') {
+    hudStatus.textContent = '[KEYBOARD MODE - NO MEDIAPIPE]';
+    hudStatus.style.color = '#FB8C00';
+    console.warn('MediaPipe not loaded, using keyboard');
+    return;
+  }
+
+  hudStatus.textContent = '[LOADING CAMERA...]';
+  hudStatus.style.color = '#FFD600';
+
+  const video = document.getElementById('webcam');
+
+  const hands = new Hands({
+    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+  });
+
+  hands.setOptions({
+    maxNumHands: 2,
+    modelComplexity: 1,           // 0→1: 정확도 UP (약간 느려짐)
+    minDetectionConfidence: 0.5,  // 0.7→0.5: 감지 민감도 UP
+    minTrackingConfidence: 0.4,   // 0.5→0.4: 트래킹 유지력 UP
+  });
+
+  hands.onResults(onHandResults);
+
+  const cam = new Camera(video, {
+    onFrame: async () => { await hands.send({ image: video }); },
+    width: 640,
+    height: 480,
+  });
+  // 10초 타임아웃 - 로딩 멈추면 키보드 모드로 전환
+  const camTimeout = setTimeout(() => {
+    if (!handReady) {
+      hudStatus.textContent = '[KEYBOARD MODE - CAM TIMEOUT]';
+      hudStatus.style.color = '#FB8C00';
+      console.warn('MediaPipe loading timed out, using keyboard mode');
+    }
+  }, 10000);
+
+  cam.start().then(() => {
+    clearTimeout(camTimeout);
+    hudStatus.textContent = '[HAND TRACKING OK]';
+    hudStatus.style.color = '#4CAF50';
+    handReady = true;
+  }).catch((err) => {
+    clearTimeout(camTimeout);
+    hudStatus.textContent = '[KEYBOARD MODE]';
+    hudStatus.style.color = '#FB8C00';
+    console.warn('Camera failed:', err);
+  });
+}
+
+// 제스처 분류
+function onHandResults(results) {
+  if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
+    gesture.detected = false;
+    return;
+  }
+
+  gesture.detected = true;
+  const allHands = results.multiHandLandmarks;
+
+  // 손가락 상태
+  function fingerStates(lm) {
+    const tips = [8,12,16,20];
+    const pips = [6,10,14,18];
+    const states = tips.map((t,i) => lm[t].y < lm[pips[i]].y);
+    const thumb = lm[4].x < lm[3].x; // 반전된 영상이므로
+    return [thumb, ...states];
+  }
+
+  function isFist(lm) {
+    const s = fingerStates(lm);
+    return !s[1] && !s[2] && !s[3] && !s[4];
+  }
+
+  function isOpen(lm) {
+    const s = fingerStates(lm);
+    return s[1] && s[2] && s[3] && s[4];
+  }
+
+  function isMiddleFinger(lm) {
+    const s = fingerStates(lm);
+    return !s[1] && s[2] && !s[3] && !s[4];
+  }
+
+  function isVSign(lm) {
+    // 검지+중지 펴짐, 약지+새끼 접힘 = V사인 (담배)
+    const s = fingerStates(lm);
+    return s[1] && s[2] && !s[3] && !s[4];
+  }
+
+  function handTilt(lm) {
+    const wrist = lm[0];
+    const mcp = lm[9];
+    const angle = Math.atan2(mcp.y - wrist.y, mcp.x - wrist.x);
+    const deg = angle * 180 / Math.PI;
+    return Math.max(-1, Math.min(1, (deg + 90) / 45));
+  }
+
+  function handHeight(lm) {
+    return 1.0 - lm[0].y;
+  }
+
+  const lm1 = allHands[0];
+
+  if (allHands.length >= 2) {
+    const lm2 = allHands[1];
+    gesture.steer = (handTilt(lm1) + handTilt(lm2)) / 2;
+    gesture.wheelieH = (handHeight(lm1) + handHeight(lm2)) / 2;
+    gesture.fist = isFist(lm1) && isFist(lm2);
+    gesture.open = isOpen(lm1) && isOpen(lm2);
+  } else {
+    gesture.steer = handTilt(lm1);
+    gesture.wheelieH = handHeight(lm1);
+    gesture.fist = isFist(lm1);
+    gesture.open = isOpen(lm1);
+  }
+
+  // 뻐큐 (아무 손이나)
+  gesture.taunt = allHands.some(lm => isMiddleFinger(lm));
+  gesture.vsign = allHands.some(lm => isVSign(lm));
+}
+
+
+// ============================================================
+//  INPUT (키보드)
+// ============================================================
+document.addEventListener('keydown', e => {
+  e.preventDefault();
+  keys[e.key.toLowerCase()] = true;
+  keys[e.code] = true;
+});
+document.addEventListener('keyup', e => {
+  keys[e.key.toLowerCase()] = false;
+  keys[e.code] = false;
+});
+
+
+// ============================================================
+//  GAME LOOP
+// ============================================================
+function gameLoop() {
+  requestAnimationFrame(gameLoop);
+  if (!gameStarted) return;
+
+  const dt = Math.min(clock.getDelta(), 0.05);
+
+  // === 사망 (3인칭 - 날아가는 라이더 따라가기) ===
+  if (isDead) {
+    deathTimer -= dt;
+
+    // 래그돌 파츠 물리 업데이트
+    let riderPos = new THREE.Vector3(bikeX, 3, bikeZ);
+    for (const part of ragdollParts) {
+      part.vel.y -= 15 * dt;
+      part.mesh.position.x += part.vel.x * dt;
+      part.mesh.position.y += part.vel.y * dt;
+      part.mesh.position.z += part.vel.z * dt;
+      part.mesh.rotation.x += part.rotVel.x * dt;
+      part.mesh.rotation.z += part.rotVel.z * dt;
+
+      // 바닥 충돌: y=0 아래로 안 가게
+      if (part.mesh.position.y <= 0.3) {
+        part.mesh.position.y = 0.3;
+        part.vel.y = Math.abs(part.vel.y) * 0.3; // 바운스 (감쇠)
+        part.vel.x *= 0.9;  // 마찰
+        part.vel.z *= 0.9;
+        part.rotVel.x *= 0.8;
+        part.rotVel.z *= 0.8;
+      }
+    }
+
+    // 카메라가 날아가는 라이더를 따라감
+    if (ragdollParts.length >= 2) {
+      riderPos = ragdollParts[1].mesh.position;
+    }
+    const dCamX = riderPos.x - 5;
+    const dCamY = Math.max(riderPos.y + 3, 4);
+    const dCamZ = riderPos.z - 8;
+    camera.position.x += (dCamX - camera.position.x) * 4 * dt;
+    camera.position.y += (dCamY - camera.position.y) * 4 * dt;
+    camera.position.z += (dCamZ - camera.position.z) * 6 * dt;
+    camera.lookAt(riderPos.x, Math.max(riderPos.y, 0), riderPos.z);
+
+    if (deathTimer <= 0) respawn();
+    renderer.render(scene, camera);
+    return;
+  }
+
+  // === 입력 적용 ===
+  if (gesture.detected) {
+    hudStatus.textContent = '[HAND TRACKING]';
+    hudStatus.style.color = '#4CAF50';
+
+    steerVal = gesture.steer;
+    wheelieTarget = gesture.wheelieH * 90;
+
+    if (gesture.fist) speed += accel * dt;
+    else if (gesture.open) speed -= brakeForce * dt;
+    else speed -= decel * 0.3 * dt;
+  } else {
+    hudStatus.textContent = '[KEYBOARD MODE]';
+    hudStatus.style.color = '#FB8C00';
+
+    // 키보드
+    if (keys['w'] || keys['arrowup'] || keys['W'] || keys['ArrowUp']) speed += accel * dt;
+    else if (keys['s'] || keys['arrowdown'] || keys['S'] || keys['ArrowDown']) speed -= brakeForce * dt;
+    else speed -= decel * 0.3 * dt;
+
+    let ks = 0;
+    if (keys['a'] || keys['arrowleft'] || keys['A'] || keys['ArrowLeft']) ks = 1;
+    if (keys['d'] || keys['arrowright'] || keys['D'] || keys['ArrowRight']) ks = -1;
+    steerVal = ks;
+
+    // Space = 윌리 (앞바퀴 들기)
+    if (keys['Space'] || keys[' ']) wheelieTarget = Math.min(wheelieTarget + 120 * dt, 90);
+    else wheelieTarget = Math.max(wheelieTarget - 90 * dt, 0);
+  }
+
+  speed = Math.max(0, Math.min(speed, maxSpeed));
+
+  // === 윌리 / 공중 스턴트 분리 ===
+  const inAirStunt = isJumping || jumpY > 0.3;
+
+  if (inAirStunt) {
+    // 공중: 윌리 속도 보너스 없음, Ctrl/Shift로 회전
+    wheelieMult = 1;
+
+    // Space와 Shift 중 하나만 적용 (동시 누르면 Space 우선)
+    const pressSpace = keys['Space'] || keys[' '] || gesture.wheelieH > 0.6;
+    const pressShift = keys['ShiftLeft'] || keys['ShiftRight'] || keys['shift'];
+
+    if (pressSpace) {
+      backflipAngle += 250 * dt;       // 뒤로 회전 (백플립)
+      backflipActive = true;           // 공중 스턴트 활성화
+    } else if (pressShift) {
+      backflipAngle -= 250 * dt;       // 앞으로 회전 (리버스)
+      backflipActive = true;
+    }
+  } else {
+    // 지상: 윌리 시스템 (속도 부스트)
+    // backflipAngle 리셋은 착지 판정 섹션에서 처리
+
+    if (!backflipActive) {
+      const diff = wheelieTarget - wheelieAngle;
+      wheelieAngle += diff * 5 * dt;
+    }
+
+    if (wheelieAngle < 20) wheelieMult = 1;
+    else if (wheelieAngle < 40) wheelieMult = 1.2;
+    else if (wheelieAngle < 60) wheelieMult = 1.5;
+    else if (wheelieAngle < 75) wheelieMult = 2.0;
+    else wheelieMult = 2.5;
+  }
+
+  // 흔들림 (지상에서만)
+  let wobble = 0;
+  if (!inAirStunt && wheelieAngle > 60) {
+    const str = (wheelieAngle - 60) / 30;
+    wobble = (Math.random() - 0.5) * str * 15;
+  }
+
+  // 윌리 사망 (지상에서만)
+  if (!inAirStunt && wheelieAngle >= 85) { die('wheelie'); renderer.render(scene, camera); return; }
+
+  // === 이동 ===
+  window.effSpeed = speed * wheelieMult;
+  const effSpeed = window.effSpeed;
+  const turnReduction = 1 - (effSpeed / maxSpeed) * 0.5;
+  const targetLean = steerVal * 35 * turnReduction;
+  leanAngle += (targetLean - leanAngle) * 5 * dt;
+
+  bikeZ += effSpeed * dt;
+  bikeX -= Math.sin(leanAngle * Math.PI / 180) * effSpeed * 0.03;
+  bikeX = Math.max(-5, Math.min(5, bikeX));
+
+  // === 점프 물리 ===
+  if (isJumping) {
+    jumpVel -= 25 * dt; // 중력
+    jumpY += jumpVel * dt;
+    if (jumpY <= 0) { jumpY = 0; jumpVel = 0; isJumping = false; }
+  }
+
+  // 점프대 체크 (종류별 점프력)
+  for (const ramp of ramps) {
+    if (!ramp.parent) continue;
+    const wp = new THREE.Vector3(); ramp.getWorldPosition(wp);
+    if (Math.abs(bikeX - wp.x) < ramp.userData.hw &&
+        Math.abs(bikeZ - wp.z) < ramp.userData.hd && !isJumping && jumpY === 0 && effSpeed > 10) {
+      isJumping = true;
+      backflipActive = true;
+      backflipAngle = 0;
+
+      const power = ramp.userData.rampPower || 0;
+      const speedBonus = effSpeed * effSpeed * 0.005; // 속도 제곱 비례 (고속일수록 훨씬 높이)
+      if (power === 0) {
+        // 소형: 낮은 점프
+        jumpVel = 3 + effSpeed * 0.1 + speedBonus * 0.3;
+        score += 50;
+      } else if (power === 1) {
+        // 중형: 보통 점프
+        jumpVel = 5 + effSpeed * 0.15 + speedBonus * 0.5;
+        score += 100;
+      } else {
+        // 대형: 높은 점프
+        jumpVel = 8 + effSpeed * 0.2 + speedBonus * 0.8;
+        score += 200;
+      }
+    }
+  }
+
+  // 공중 스턴트 (회전은 윌리/공중 섹션에서 처리)
+  if (backflipActive) {
+
+    // 착지 판정 (공중에서 땅에 닿을 때)
+    if (!isJumping && jumpY <= 0) {
+      backflipActive = false;
+      const landedAirTime = airTime;
+      airTime = 0;
+
+      // 묘기 판정: 총 회전량으로 판단
+      const totalAngle = backflipAngle;
+      const absAngle = Math.abs(totalAngle);
+      const landAngle = ((totalAngle % 360) + 360) % 360; // 0~360 정규화
+      const isReverse = totalAngle < 0;
+
+      // 착지 각도 체크 (바퀴가 아래 = 0±55도)
+      const safeAngle = landAngle <= 55 || landAngle >= 305;
+
+      if (safeAngle) {
+        // === 착지 성공! 묘기 판정 ===
+        // 305~360도(또는 리버스 -305~-360) = 거의 한바퀴 → 올림
+        const roundedAngle = (landAngle >= 305) ? absAngle + (360 - landAngle) : absAngle;
+        const flips = Math.floor(roundedAngle / 360);
+        let trickName = '';
+        let trickScore = 0;
+        const prefix = isReverse ? 'REVERSE ' : '';
+        const tricks = [];
+
+        // 에어타임 기본 점수 (50 단위 반올림)
+        const baseAirScore = Math.round(landedAirTime * 100 / 50) * 50;
+        const ms = Math.floor(landedAirTime * 1000);
+        const sec = Math.floor(ms / 1000);
+        const msR = ms % 1000;
+        const timeStr = `${sec}.${String(Math.floor(msR/10)).padStart(2,'0')}s`;
+
+        // 플립 판정 + 에어타임 배수
+        // 일반: 플립 2x, 더블 4x, 트리플 6x
+        // 리버스: 플립 3x, 더블 6x, 트리플 9x
+        let airMult = 1;
+
+        if (flips >= 3) {
+          tricks.push(prefix + 'TRIPLE FLIP!!');
+          trickScore += 5000;
+          airMult = isReverse ? 9 : 6;
+        } else if (flips >= 2) {
+          tricks.push(prefix + 'DOUBLE FLIP!');
+          trickScore += 3000;
+          airMult = isReverse ? 6 : 4;
+        } else if (flips >= 1) {
+          tricks.push(prefix + 'FLIP!');
+          trickScore += 1000;
+          airMult = isReverse ? 3 : 2;
+        }
+
+        // 에어타임 점수 (배수 적용)
+        const airTimeScore = baseAirScore * airMult;
+        if (airTimeScore > 0) {
+          const multText = airMult > 1 ? ` ${airMult}X` : '';
+          tricks.push(`AIR ${timeStr}${multText}`);
+          trickScore += airTimeScore;
+        }
+
+        if (trickScore > 0) {
+          trickName = tricks.join(' + ');
+          score += trickScore;
+          hudTaunt.textContent = `${trickName} +${trickScore}`;
+          hudTaunt.className = 'hud-taunt';
+          if (trickScore >= 10000) {
+            hudTaunt.classList.add('trick-epic');
+            hudTaunt.style.color = '#E040A0';
+          } else if (trickScore >= 5000) {
+            hudTaunt.classList.add('trick-big');
+            hudTaunt.style.color = '#7E57C2';
+          } else if (trickScore >= 2000) {
+            hudTaunt.classList.add('trick-mid');
+            hudTaunt.style.color = '#FFD600';
+          } else {
+            hudTaunt.classList.add('trick-small');
+            hudTaunt.style.color = '#FFD600';
+          }
+          hudTaunt.style.display = 'block';
+          tauntTimer = 2.5;
+        }
+
+        // 착지 시 바퀴 들린 각도 → 윌리 값으로 전환
+        // landAngle 0=수평, 30=약간 윌리, 305~360=약간 앞으로 숙임
+        if (landAngle <= 55) {
+          wheelieAngle = landAngle;       // 뒤로 들린 만큼 윌리
+          wheelieTarget = landAngle;
+        } else {
+          wheelieAngle = 0;               // 앞으로 숙인 건 윌리 0
+          wheelieTarget = 0;
+        }
+        backflipAngle = 0;
+      } else {
+        // 고꾸라짐 사망
+        backflipAngle = 0;
+        die('crash');
+      }
+    }
+  }
+
+  // 바이크 위치/회전
+  bike.position.set(bikeX, jumpY, bikeZ);
+  if (inAirStunt) {
+    // 공중: 스턴트 회전 (양수=백플립, 음수=리버스)
+    bike.rotation.x = -backflipAngle * Math.PI / 180;
+    bike.rotation.z = -leanAngle * 0.3 * Math.PI / 180;
+  } else {
+    bike.rotation.x = -(wheelieAngle + wobble) * Math.PI / 180;
+    bike.rotation.z = -leanAngle * 0.5 * Math.PI / 180;
+  }
+
+  // 공중이면 자동으로 3인칭 스턴트 모드
+  const inAirNow = (isJumping || jumpY > 2.0) && !isDead;  // 높이 2 이하면 1인칭 전환
+
+  if (inAirNow) {
+    // 공중: 3인칭 + 에어타임 카운터
+    airTime += dt;
+    if (bikeBodyGroup) bikeBodyGroup.visible = true;
+    if (riderGroup) riderGroup.visible = true;
+    if (fpvGroup) fpvGroup.visible = false;
+    // 에어타임 타이머 표시 (00:00:00 형식)
+    if (tauntTimer <= 0) {
+      const ms = Math.floor(airTime * 1000);
+      const sec = Math.floor(ms / 1000);
+      const msR = ms % 1000;
+      const min = Math.floor(sec / 60);
+      const secR = sec % 60;
+      const timeStr = `${String(min).padStart(2,'0')}:${String(secR).padStart(2,'0')}:${String(Math.floor(msR/10)).padStart(2,'0')}`;
+      const timeColor = airTime < 2 ? '#4CAF50' : airTime < 4 ? '#FFD600' : '#E53935';
+      hudTaunt.innerHTML = `STUNT!<br><span style="font-size:12px;color:${timeColor}">${timeStr}</span>`;
+      hudTaunt.style.color = '#FFD600';
+      hudTaunt.style.display = 'block';
+    }
+  } else if (!isDead && !tauntLookBack) {
+    // 지상: 1인칭 (바이크/라이더 숨김)
+    if (bikeBodyGroup) bikeBodyGroup.visible = false;
+    if (riderGroup) riderGroup.visible = false;
+    if (fpvGroup) fpvGroup.visible = true;
+    // tauntTimer 남아있으면 텍스트 유지 (FLIP! 등)
+    if (tauntTimer <= 0) hudTaunt.style.display = 'none';
+  }
+
+  // tauntTimer 카운트다운 + 텍스트 보장
+  tauntTimer = Math.max(0, tauntTimer - dt);
+  // tauntTimer가 남아있으면 무조건 표시 (어떤 뷰에서든)
+  if (tauntTimer > 0) hudTaunt.style.display = 'block';
+
+  // === 코인 수집 ===
+  for (let i = coins.length - 1; i >= 0; i--) {
+    const c = coins[i];
+    if (!c.parent) { coins.splice(i, 1); continue; }
+    // 코인 회전 애니메이션
+    c.rotation.y += 3 * dt;
+    const wp = new THREE.Vector3(); c.getWorldPosition(wp);
+    if (Math.abs(bikeX - wp.x) < 1 && Math.abs(bikeZ - wp.z) < 1.5) {
+      score += 100;
+      c.parent.remove(c);
+      coins.splice(i, 1);
+    }
+  }
+
+  // === 무적 ===
+  invincibleTimer = Math.max(0, invincibleTimer - dt);
+
+  if (invincibleTimer > 0) {
+    bike.visible = Math.floor(invincibleTimer * 10) % 2 === 0;
+  } else {
+    bike.visible = true;
+  }
+
+  // === 충돌 (점프 중이면 통과) ===
+  if (invincibleTimer <= 0 && jumpY < 0.5 && checkCollision()) die('crash');
+
+  // === AI 레이서 업데이트 ===
+  for (const ai of aiRacers) {
+    // 속도 변동 (플레이어 근처 유지)
+    const distZ = bikeZ - ai.z;
+    if (distZ > 20) ai.speed = Math.min(ai.speed + 8 * dt, maxSpeed * 1.1);
+    else if (distZ < -10) ai.speed = Math.max(ai.speed - 5 * dt, 10);
+    else ai.speed += (Math.random() - 0.45) * 3 * dt;
+
+    ai.z += ai.speed * dt;
+
+    // 좌우 웨이빙
+    ai.wobbleTimer += dt;
+    ai.targetX = Math.sin(ai.wobbleTimer * 0.5 + ai.z * 0.01) * 3;
+    ai.x += (ai.targetX - ai.x) * 2 * dt;
+    ai.x = Math.max(-4.5, Math.min(4.5, ai.x));
+
+    // 가끔 윌리
+    ai.wheelieAngle = Math.sin(ai.wobbleTimer * 0.3) * 15 + 10;
+
+    ai.group.position.set(ai.x, 0, ai.z);
+    ai.group.rotation.x = -ai.wheelieAngle * Math.PI / 180;
+  }
+
+  // (래그돌은 사망 루프에서 처리)
+
+  // === 트랙 ===
+  updateTrack();
+
+  // === 점수 ===
+  score = Math.max(score, Math.floor(bikeZ * 10));
+
+  // === 카메라 ===
+  if (inAirNow && !tauntLookBack) {
+    // 공중: 시네마틱 스턴트 카메라 (뒤쪽에서만 좌우로 흔들림)
+    // 각도 범위: -40도 ~ +40도 (뒤쪽만, 앞으로 안 감)
+    const cinSwing = Math.sin(performance.now() * 0.0005) * 0.7; // -0.7 ~ 0.7 라디안 (약 ±40도)
+    const cinDist = 8;
+    const cinX = bikeX + Math.sin(cinSwing) * cinDist;
+    const cinY = jumpY + 4;
+    const cinZ = bikeZ - Math.abs(Math.cos(cinSwing)) * cinDist; // 항상 뒤쪽 (- 방향)
+    camera.position.x += (cinX - camera.position.x) * 5 * dt;
+    camera.position.y += (cinY - camera.position.y) * 5 * dt;
+    camera.position.z += (cinZ - camera.position.z) * 8 * dt;
+    camera.lookAt(bikeX, jumpY + 1, bikeZ);
+  } else if (tauntLookBack) {
+    // 뻐큐: 라이더 머리 위치에서 뒤를 봄 (3인칭 헤드캠)
+    const headY = 2.8 + jumpY;
+    const headZ = bikeZ - 0.2;  // 라이더 머리 약간 뒤
+    camera.position.z = headZ;
+    camera.position.x += (bikeX - camera.position.x) * 12 * dt;
+    camera.position.y += (headY - camera.position.y) * 12 * dt;
+    camera.lookAt(bikeX, 2, bikeZ - 40);  // 뒤를 봄
+  } else {
+    // 1인칭 (바이크에 고정)
+    // 윌리 각도에 비례해서 카메라가 위를 봄 (자연스러운 라이더 시점)
+    const wheelieRad = wheelieAngle * Math.PI / 180;
+    const fpY = 2.2 + jumpY + Math.sin(wheelieRad) * 2.0;
+    camera.position.z = bikeZ + 0.3;
+    camera.position.x += (bikeX - camera.position.x) * 12 * dt;
+    camera.position.y += (fpY - camera.position.y) * 12 * dt;
+
+    // 윌리 각도만큼 하늘을 봄 (실제 라이더가 뒤로 젖혀지는 시점)
+    const wRatio = wheelieAngle / 90; // 0~1
+    const lookY = 1.5 + wRatio * wRatio * 60;  // 0도=1.5, 45도=16, 90도=61 (하늘)
+    const lookZ = bikeZ + 30 - wRatio * 20;    // 윌리할수록 가까이 봄
+    camera.lookAt(bikeX, lookY, lookZ);
+  }
+
+  // 핸들바 스티어링 회전
+  if (fpvGroup) {
+    fpvGroup.rotation.z = leanAngle * 0.015;
+    fpvGroup.rotation.y = leanAngle * 0.008;
+  }
+
+  // 화면 흔들림
+  if (wheelieAngle > 60) {
+    const sh = (wheelieAngle - 60) / 80;
+    camera.position.x += (Math.random() - 0.5) * sh;
+    camera.position.y += (Math.random() - 0.5) * sh * 0.3;
+    camera.rotation.z += (Math.random() - 0.5) * sh * 0.02;
+  }
+
+  // === 도발 ===
+  tauntCD = Math.max(0, tauntCD - dt);
+
+  // === 뻐큐 (홀드) ===
+  const holdingTaunt = gesture.taunt || keys['f'];
+  const inAir = inAirNow;
+  tauntLookBack = false;
+
+  if (holdingTaunt && !isDead) {
+    hudTaunt.textContent = '* TAUNT! *';
+    hudTaunt.style.color = '#7E57C2';
+    hudTaunt.style.display = 'block';
+
+    // 뻐큐 손 생성 (최초 1회)
+    if (!tauntHandMesh) {
+      tauntHandMesh = new THREE.Group();
+      const fist = box(0.22, 0.28, 0.22, 0xFFCC80);
+      tauntHandMesh.add(fist);
+      const midF = box(0.07, 0.35, 0.07, 0xFFCC80);
+      midF.position.set(0, 0.3, 0);
+      tauntHandMesh.add(midF);
+      const arm = box(0.15, 0.7, 0.15, 0x1E88E5);
+      arm.position.set(0, -0.5, 0);
+      tauntHandMesh.add(arm);
+    }
+    tauntHandMesh.visible = true;
+    tauntHandTimer = Math.min(tauntHandTimer + dt * 4, 1);
+
+    if (inAir) {
+      // === 공중: 3인칭 캐릭터가 뻐큐 ===
+      // 손을 바이크(라이더) 위에 붙이기
+      if (tauntHandMesh.parent !== bike) {
+        if (tauntHandMesh.parent) tauntHandMesh.parent.remove(tauntHandMesh);
+        bike.add(tauntHandMesh);
+      }
+      tauntHandMesh.position.set(0.5, 2.8 + Math.sin(performance.now()*0.006)*0.15, -0.3);
+      tauntHandMesh.rotation.z = Math.sin(performance.now() * 0.006) * 0.25;
+
+      // 바이크/라이더 보이기 (3인칭이니까)
+      if (bikeBodyGroup) bikeBodyGroup.visible = true;
+      if (riderGroup) riderGroup.visible = true;
+      if (fpvGroup) fpvGroup.visible = false;
+
+    } else {
+      // === 지상: 1인칭 뒤보기 뻐큐 ===
+      tauntLookBack = true;
+      if (tauntHandMesh.parent !== camera) {
+        if (tauntHandMesh.parent) tauntHandMesh.parent.remove(tauntHandMesh);
+        camera.add(tauntHandMesh);
+      }
+      tauntHandMesh.position.set(0.3, -0.8 + tauntHandTimer * 0.9, -1.0);
+      tauntHandMesh.rotation.z = Math.sin(performance.now() * 0.006) * 0.25;
+
+      if (fpvGroup) fpvGroup.visible = false;
+    }
+
+  } else {
+    // 뻐큐 놓으면 복귀
+    if (tauntHandMesh && tauntHandMesh.visible) {
+      if (tauntHandMesh.parent) tauntHandMesh.parent.remove(tauntHandMesh);
+      tauntHandMesh.visible = false;
+      tauntHandTimer = 0;
+      if (!isDead && !inAirNow) {
+        if (fpvGroup) fpvGroup.visible = true;
+        if (bikeBodyGroup) bikeBodyGroup.visible = false;
+        if (riderGroup) riderGroup.visible = false;
+      }
+    }
+    if (tauntTimer <= 0 && !inAirNow) hudTaunt.style.display = 'none';
+  }
+
+  // === 담배 시스템 ===
+  const hudSmoke = document.getElementById('hud-smoke');
+  const doVsign = gesture.vsign || keys['v'] || keys['V'];
+
+  if (smokeState === 'idle' && doVsign && !isDead) {
+    // 담배 물기
+    smokeState = 'smoking';
+    smokeTimer = 0;
+    // 1인칭 담배 생성 (카메라 하단 중앙)
+    if (!cigMesh) {
+      cigMesh = new THREE.Group();
+      const cig = box(0.04, 0.04, 0.25, 0xF5E6C8); // 담배 본체
+      cigMesh.add(cig);
+      const tip = box(0.045, 0.045, 0.05, 0xE53935); // 불 붙은 끝
+      tip.position.z = -0.12;
+      cigMesh.add(tip);
+      const filter = box(0.042, 0.042, 0.06, 0xE0834E); // 필터
+      filter.position.z = 0.13;
+      cigMesh.add(filter);
+    }
+    cigMesh.position.set(0.15, -0.35, -0.6);
+    cigMesh.rotation.set(0, 0, -0.1);
+    cigMesh.visible = true;
+    camera.add(cigMesh);
+  }
+
+  if (smokeState === 'smoking' || smokeState === 'canFlick') {
+    if (smokeState === 'smoking') smokeTimer += dt;
+    hudSmoke.style.display = 'block';
+    hudSmoke.textContent = smokeState === 'canFlick' ? 'V: FLICK IT!' : 'SMOKING...';
+
+    // 3인칭(공중)이면: 1인칭 담배 숨기고, 라이더 입에 3인칭 담배 표시
+    if (inAirNow) {
+      if (cigMesh) cigMesh.visible = false;
+      if (!cig3rdMesh) {
+        cig3rdMesh = new THREE.Group();
+        cig3rdMesh.add(box(0.04, 0.04, 0.3, 0xF5E6C8));
+        const t = box(0.045, 0.045, 0.06, 0xE53935); t.position.z = -0.15; cig3rdMesh.add(t);
+        const f = box(0.042, 0.042, 0.07, 0xE0834E); f.position.z = 0.16; cig3rdMesh.add(f);
+      }
+      if (cig3rdMesh.parent !== bike) {
+        if (cig3rdMesh.parent) cig3rdMesh.parent.remove(cig3rdMesh);
+        bike.add(cig3rdMesh);
+      }
+      cig3rdMesh.position.set(0.15, 2.2, 0.12); // 라이더 입 위치
+      cig3rdMesh.rotation.set(0, 0, -0.15);
+      cig3rdMesh.visible = true;
+    } else {
+      // 1인칭이면: 1인칭 담배 보이고, 3인칭 담배 숨기기
+      if (cigMesh) cigMesh.visible = true;
+      if (cig3rdMesh) cig3rdMesh.visible = false;
+    }
+
+    // 연기 파티클
+    if (Math.random() < 0.3) {
+      const puff = box(0.06, 0.06, 0.06, 0xDDDDDD);
+      puff.material.transparent = true;
+      puff.material.opacity = 0.6;
+      let smokePos;
+      if (inAirNow && cig3rdMesh) {
+        smokePos = new THREE.Vector3();
+        cig3rdMesh.getWorldPosition(smokePos);
+      } else {
+        smokePos = new THREE.Vector3(0.15, -0.35, -0.72);
+        camera.localToWorld(smokePos);
+      }
+      puff.position.copy(smokePos);
+      scene.add(puff);
+      cigSmoke.push({ mesh: puff, life: 1.5, vel: new THREE.Vector3((Math.random()-0.5)*0.5, 1 + Math.random(), (Math.random()-0.5)*0.5) });
+    }
+
+    // 5초 후 던지기 가능
+    if (smokeState === 'smoking' && smokeTimer >= 5) {
+      smokeState = 'canFlick';
+    }
+  }
+
+  if (smokeState === 'canFlick' && doVsign) {
+    // 담배 던지기!
+    smokeState = 'flicking';
+    smokeTimer = 0;
+    hudSmoke.textContent = '* FLICK! *';
+
+    // 카메라에서 분리해서 월드로
+    if (cigMesh) {
+      const wp = new THREE.Vector3();
+      cigMesh.getWorldPosition(wp);
+      camera.remove(cigMesh);
+      cigMesh.position.copy(wp);
+      scene.add(cigMesh);
+      flickCig = {
+        mesh: cigMesh,
+        vel: new THREE.Vector3(-5 - Math.random()*3, 2+Math.random()*2, speed*0.3),  // 항상 왼쪽으로
+        rotVel: new THREE.Vector3(10, 5, 8),
+        life: 2,
+      };
+      cigMesh = null;
+    }
+  }
+
+  if (smokeState === 'flicking') {
+    smokeTimer += dt;
+    if (smokeTimer > 1) {
+      smokeState = 'idle';
+      hudSmoke.style.display = 'none';
+    }
+  }
+
+  // 던져진 담배 물리
+  if (flickCig) {
+    flickCig.vel.y -= 8 * dt;
+    flickCig.mesh.position.x += flickCig.vel.x * dt;
+    flickCig.mesh.position.y += flickCig.vel.y * dt;
+    flickCig.mesh.position.z += flickCig.vel.z * dt;
+    flickCig.mesh.rotation.x += flickCig.rotVel.x * dt;
+    flickCig.mesh.rotation.z += flickCig.rotVel.z * dt;
+    flickCig.life -= dt;
+    if (flickCig.life <= 0) {
+      scene.remove(flickCig.mesh);
+      flickCig = null;
+    }
+  }
+
+  // 연기 파티클 업데이트
+  for (let i = cigSmoke.length - 1; i >= 0; i--) {
+    const p = cigSmoke[i];
+    p.mesh.position.x += p.vel.x * dt;
+    p.mesh.position.y += p.vel.y * dt;
+    p.mesh.position.z += p.vel.z * dt;
+    p.life -= dt;
+    p.mesh.material.opacity = Math.max(0, p.life / 1.5) * 0.6;
+    p.mesh.scale.multiplyScalar(1 + dt * 0.5);
+    if (p.life <= 0) {
+      scene.remove(p.mesh);
+      cigSmoke.splice(i, 1);
+    }
+  }
+
+  // === HUD ===
+  hudScore.textContent = `SCORE: ${score}`;
+  hudSpeed.textContent = `${Math.floor(effSpeed * 3.6)} km/h`;
+  const wp = wheelieAngle / 90;
+  hudWLabel.textContent = `WHEELIE: ${Math.floor(wp * 100)}%`;
+  hudGauge.style.width = `${wp * 100}%`;
+
+  if (wp < 0.45) { hudGauge.style.backgroundColor = '#4CAF50'; hudWLabel.style.color = '#4CAF50'; }
+  else if (wp < 0.7) { hudGauge.style.backgroundColor = '#FFD600'; hudWLabel.style.color = '#FFD600'; }
+  else if (wp < 0.85) { hudGauge.style.backgroundColor = '#FB8C00'; hudWLabel.style.color = '#FB8C00'; }
+  else { hudGauge.style.backgroundColor = '#E53935'; hudWLabel.style.color = '#E53935'; }
+
+  renderer.render(scene, camera);
+}
+
+function die(cause) {
+  isDead = true;
+  deathTimer = 3;
+  airTime = 0;
+  const crashSpeed = window.effSpeed || 15;
+  speed = 0;
+  hudDeath.style.display = 'block';
+  if (fpvGroup) fpvGroup.visible = false;
+
+  // 담배 제거
+  if (cigMesh) { camera.remove(cigMesh); cigMesh.visible = false; cigMesh = null; }
+  if (cig3rdMesh) { if(cig3rdMesh.parent) cig3rdMesh.parent.remove(cig3rdMesh); cig3rdMesh.visible = false; cig3rdMesh = null; }
+  if (flickCig) { scene.remove(flickCig.mesh); flickCig = null; }
+  cigSmoke.forEach(p => scene.remove(p.mesh));
+  cigSmoke = [];
+  smokeState = 'idle';
+  smokeTimer = 0;
+  const hs = document.getElementById('hud-smoke');
+  if (hs) hs.style.display = 'none';
+
+  // 바이크 숨기기
+  bike.visible = false;
+
+  // 래그돌 초기화
+  ragdollParts.forEach(p => { if(p.mesh.parent) scene.remove(p.mesh); });
+  ragdollParts = [];
+
+  const flingPower = crashSpeed * 0.4;
+
+  if (cause === 'wheelie') {
+    // === 윌리 사망: 라이더 뒤로 넘어짐, 바이크는 앞으로 ===
+    hudDeath.textContent = 'FLIPPED!';
+
+    // 바이크 → 앞으로 슬라이딩
+    const bikeCopy = makeBikeModel(0xF95858);
+    bikeCopy.position.set(bikeX, jumpY + 0.5, bikeZ);
+    scene.add(bikeCopy);
+    ragdollParts.push({
+      mesh: bikeCopy,
+      vel: new THREE.Vector3((Math.random()-0.5)*2, 1, flingPower + 8),
+      rotVel: new THREE.Vector3(2, 0, 1),
+    });
+
+    // 라이더 → 뒤로 넘어짐 (뒤쪽 + 위로)
+    const riderCopy = makeRiderModel(0x1E88E5, 0xE53935);
+    riderCopy.position.set(bikeX, jumpY + 2.5, bikeZ - 0.5);
+    riderCopy.rotation.x = -2.5; // 뒤로 젖혀진 자세
+    scene.add(riderCopy);
+    ragdollParts.push({
+      mesh: riderCopy,
+      vel: new THREE.Vector3(
+        (Math.random()-0.5) * 3,
+        5 + Math.random() * 3,
+        -(flingPower * 0.5 + 3)  // 뒤로 날아감
+      ),
+      rotVel: new THREE.Vector3(-6 - Math.random()*4, 1, 2),  // 뒤로 회전
+    });
+
+  } else {
+    // === 충돌 사망: 라이더 앞으로 날아감, 바이크 찌그러짐 ===
+    hudDeath.textContent = 'WRECKED!';
+
+    // 바이크 → 제자리서 튕김
+    const bikeCopy = makeBikeModel(0xF95858);
+    bikeCopy.position.set(bikeX, jumpY + 0.5, bikeZ);
+    scene.add(bikeCopy);
+    ragdollParts.push({
+      mesh: bikeCopy,
+      vel: new THREE.Vector3((Math.random()-0.5)*5, 3 + flingPower*0.2, -2),
+      rotVel: new THREE.Vector3(4 + Math.random()*4, 2, 3 + Math.random()*3),
+    });
+
+    // 라이더 → 앞으로 개멀리 날아감 (속도 비례)
+    const riderCopy = makeRiderModel(0x1E88E5, 0xE53935);
+    riderCopy.position.set(bikeX, jumpY + 2, bikeZ + 1);
+    scene.add(riderCopy);
+    ragdollParts.push({
+      mesh: riderCopy,
+      vel: new THREE.Vector3(
+        (Math.random()-0.5) * flingPower * 0.8,
+        6 + flingPower * 0.5,
+        flingPower * 1.5 + 8
+      ),
+      rotVel: new THREE.Vector3(8 + flingPower*0.3, 3, 6 + flingPower*0.2),
+    });
+  }
+}
+
+let invincibleTimer = 0;
+
+function respawn() {
+  isDead = false;
+  speed = 0;
+  wheelieAngle = 0;
+  wheelieTarget = 0;
+  leanAngle = 0;
+  bikeX = 0;
+  jumpY = 0;
+  jumpVel = 0;
+  isJumping = false;
+  bike.rotation.x = 0;
+  bike.rotation.z = 0;
+  bike.position.set(0, 0, bikeZ);
+  bike.visible = true;
+  invincibleTimer = 1;
+  hudDeath.style.display = 'none';
+
+  // 래그돌 파츠 정리
+  ragdollParts.forEach(p => { if(p.mesh.parent) scene.remove(p.mesh); });
+  ragdollParts = [];
+
+  // 카메라 1인칭으로 복귀 + 핸들바 표시
+  camera.position.set(0, 2.2, bikeZ + 0.3);
+  camera.lookAt(0, 1.5, bikeZ + 30);
+  if (fpvGroup) fpvGroup.visible = true;
+}
+
+
+// ============================================================
+//  START
+// ============================================================
+function startGame() {
+  document.getElementById('start-screen').style.display = 'none';
+  gameStarted = true;
+  clock.start();
+}
+
+// init
+initThree();
+createBike();
+createAIRacers();
+for (let i = 0; i < SEGS_AHEAD; i++) createSegment(lastSegZ + SEG_LEN);
+initMediaPipe();
+gameLoop();
+</script>
+</body>
+</html>
