@@ -722,7 +722,7 @@ function genRoomCode() {
   return Math.random().toString(36).substring(2, 8).toUpperCase();
 }
 
-function startSolo() {
+window.startSolo = function() {
   isMultiplayer = false;
   document.getElementById('lobby-screen').style.display = 'none';
   document.getElementById('start-screen').style.display = 'flex';
@@ -738,7 +738,7 @@ const iceConfig = {
   ]
 };
 
-function createRoom() {
+window.createRoom = function() {
   const status = document.getElementById('lobby-status');
   status.textContent = 'CREATING ROOM...';
 
@@ -776,7 +776,7 @@ function createRoom() {
   });
 }
 
-function joinRoom() {
+window.joinRoom = function() {
   const code = document.getElementById('room-input').value.trim().toUpperCase();
   if (!code) return;
 
@@ -1828,7 +1828,7 @@ function respawn() {
 // ============================================================
 //  START
 // ============================================================
-function startGame() {
+window.startGame = function() {
   document.getElementById('start-screen').style.display = 'none';
   gameStarted = true;
   clock.start();
