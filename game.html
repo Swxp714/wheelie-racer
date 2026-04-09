@@ -73,6 +73,23 @@
   .trick-mid { font-size:28px; animation:none; }
   .trick-big { font-size:36px; animation:trickFlash 0.3s infinite; }
   .trick-epic { font-size:48px; animation:trickPulse 0.5s infinite; }
+
+  /* 트리플플립+ 불타는 도트 효과 */
+  @keyframes fireRise {
+    0% { transform:translateY(0) scale(1); opacity:1; }
+    100% { transform:translateY(-80px) scale(0.3); opacity:0; }
+  }
+  @keyframes fireRiseDown {
+    0% { transform:translateY(0) scale(1); opacity:1; }
+    100% { transform:translateY(80px) scale(0.3); opacity:0; }
+  }
+  .fire-overlay {
+    position:absolute; inset:0; pointer-events:none; overflow:hidden; z-index:11;
+  }
+  .fire-dot {
+    position:absolute; width:8px; height:8px;
+    animation: fireRise 0.6s ease-out forwards;
+  }
   .hud-controls {
     position:absolute; bottom:20px; left:24px;
     font-size:7px; color:#8888AA; line-height:2;
@@ -116,8 +133,34 @@
 </head>
 <body>
 
+<!-- 로비 화면 (멀티플레이어) -->
+<div id="lobby-screen" style="
+  position:fixed;inset:0;z-index:200;background:#1a1a2e;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;
+  font-family:'Press Start 2P',monospace;color:#fff;">
+  <h1 style="font-size:36px;color:#FFD600;text-shadow:3px 3px 0 #E53935;margin-bottom:30px;">WHEELIE<br>RACER</h1>
+  <button onclick="startSolo()" style="
+    font-family:'Press Start 2P',monospace;font-size:14px;padding:16px 40px;
+    background:#4CAF50;color:#fff;border:none;cursor:pointer;margin:8px;
+    text-shadow:2px 2px 0 rgba(0,0,0,0.3);">SOLO PLAY</button>
+  <button onclick="createRoom()" style="
+    font-family:'Press Start 2P',monospace;font-size:14px;padding:16px 40px;
+    background:#1E88E5;color:#fff;border:none;cursor:pointer;margin:8px;
+    text-shadow:2px 2px 0 rgba(0,0,0,0.3);">CREATE ROOM</button>
+  <div style="display:flex;align-items:center;gap:8px;margin:8px;">
+    <input id="room-input" placeholder="ROOM CODE" style="
+      font-family:'Press Start 2P',monospace;font-size:12px;padding:14px 16px;
+      background:#222244;color:#FFD600;border:2px solid #333366;width:200px;text-align:center;" />
+    <button onclick="joinRoom()" style="
+      font-family:'Press Start 2P',monospace;font-size:12px;padding:14px 20px;
+      background:#E53935;color:#fff;border:none;cursor:pointer;
+      text-shadow:2px 2px 0 rgba(0,0,0,0.3);">JOIN</button>
+  </div>
+  <div id="lobby-status" style="font-size:10px;color:#8888AA;margin-top:16px;"></div>
+</div>
+
 <!-- 시작 화면 -->
-<div id="start-screen">
+<div id="start-screen" style="display:none">
   <h1>WHEELIE<br>RACER</h1>
   <p>
     <b>FIST</b> = ACCELERATE &nbsp; <b>OPEN HAND</b> = BRAKE<br>
@@ -135,11 +178,19 @@
 <div id="hud">
   <div class="hud-score" id="hud-score">SCORE: 0</div>
   <div class="hud-speed" id="hud-speed">0 km/h</div>
+  <div id="hud-p2" style="position:absolute;top:20px;right:24px;margin-top:30px;font-family:'Press Start 2P',monospace;font-size:10px;color:#1E88E5;text-shadow:1px 1px 0 #000;display:none;">P2: 0</div>
   <div class="hud-wheelie-label" id="hud-wlabel">WHEELIE: 0%</div>
   <div class="hud-gauge"><div class="hud-gauge-fill" id="hud-gauge"></div></div>
   <div class="hud-status" id="hud-status">LOADING...</div>
   <div class="hud-death" id="hud-death">WRECKED!</div>
   <div class="hud-taunt" id="hud-taunt">* TAUNT! *</div>
+  <!-- 착지 점수 오버레이 -->
+  <div id="trick-overlay" style="display:none;position:absolute;inset:0;pointer-events:none;">
+    <div id="trick-mult" style="position:absolute;top:25%;right:22%;font-family:'Press Start 2P',monospace;color:#fff;text-shadow:3px 3px 0 #000;transform:rotate(-15deg)"></div>
+    <div id="trick-name" style="position:absolute;top:32%;left:50%;transform:translate(-50%,0) rotate(-8deg);font-family:'Press Start 2P',monospace;color:#FFD600;text-shadow:4px 4px 0 #000;white-space:nowrap"></div>
+    <div id="trick-air" style="position:absolute;top:50%;left:18%;font-family:'Press Start 2P',monospace;color:#fff;text-shadow:2px 2px 0 #000;transform:rotate(-5deg)"></div>
+    <div id="trick-score" style="position:absolute;top:60%;left:50%;transform:translate(-50%,0);font-family:'Press Start 2P',monospace;color:#fff;text-shadow:4px 4px 0 rgba(0,0,0,0.5)"></div>
+  </div>
   <div class="hud-taunt" id="hud-smoke" style="display:none;color:#FB8C00;top:55%">SMOKING...</div>
   <div class="hud-controls">WASD SPACE:WHEELIE/FLIP SHIFT:REVERSE F:TAUNT V:SMOKE</div>
 </div>
@@ -149,6 +200,7 @@
 
 <!-- Three.js -->
 <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
 
 <!-- MediaPipe Hands -->
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
@@ -220,6 +272,15 @@ let airTime = 0; // 공중 체공 시간 (초)
 // AI 레이서
 let aiRacers = [];
 const AI_COUNT = 3;
+
+// 멀티플레이어
+let peer = null;
+let conn = null;
+let isMultiplayer = false;
+let isHost = false;
+let remoteBike = null;
+let remoteRider = null;
+let remoteState = { x:0, z:0, y:0, rotX:0, rotZ:0, speed:0, score:0, dead:false };
 
 // 트랙
 const SEG_LEN = 30;
@@ -605,6 +666,130 @@ function checkCollision() {
 // ============================================================
 //  MEDIAPIPE HANDS
 // ============================================================
+// ============================================================
+//  MULTIPLAYER (PeerJS)
+// ============================================================
+function createRemoteBike() {
+  const group = new THREE.Group();
+  group.add(makeBikeModel(0x1E88E5));  // 파란 바이크 (상대방)
+  group.add(makeRiderModel(0xFB8C00, 0x1E88E5));  // 주황 셔츠, 파란 헬멧
+  scene.add(group);
+  remoteBike = group;
+}
+
+function sendState() {
+  if (!conn || !conn.open) return;
+  conn.send({
+    type: 'state',
+    x: bikeX,
+    z: bikeZ,
+    y: jumpY,
+    rotX: bike.rotation.x,
+    rotZ: bike.rotation.z,
+    speed: speed,
+    score: score,
+    dead: isDead,
+  });
+}
+
+function onRemoteData(data) {
+  if (data.type === 'state') {
+    remoteState = data;
+  }
+}
+
+function updateRemoteBike(dt) {
+  if (!remoteBike || !isMultiplayer) return;
+  // 부드럽게 보간
+  remoteBike.position.x += (remoteState.x - remoteBike.position.x) * 8 * dt;
+  remoteBike.position.y += (remoteState.y - remoteBike.position.y) * 8 * dt;
+  remoteBike.position.z += (remoteState.z - remoteBike.position.z) * 10 * dt;
+  remoteBike.rotation.x += (remoteState.rotX - remoteBike.rotation.x) * 8 * dt;
+  remoteBike.rotation.z += (remoteState.rotZ - remoteBike.rotation.z) * 8 * dt;
+  remoteBike.visible = !remoteState.dead;
+}
+
+function setupConnection(connection) {
+  conn = connection;
+  conn.on('data', onRemoteData);
+  conn.on('close', () => {
+    document.getElementById('lobby-status').textContent = 'DISCONNECTED';
+    isMultiplayer = false;
+  });
+}
+
+function genRoomCode() {
+  return Math.random().toString(36).substring(2, 8).toUpperCase();
+}
+
+function startSolo() {
+  isMultiplayer = false;
+  document.getElementById('lobby-screen').style.display = 'none';
+  document.getElementById('start-screen').style.display = 'flex';
+}
+
+function createRoom() {
+  const status = document.getElementById('lobby-status');
+  status.textContent = 'CREATING ROOM...';
+
+  const roomCode = genRoomCode();
+  peer = new Peer('wheelie-' + roomCode);
+  isHost = true;
+
+  peer.on('open', () => {
+    status.innerHTML = `ROOM CODE: <span style="color:#FFD600;font-size:16px">${roomCode}</span><br><br>WAITING FOR PLAYER...`;
+  });
+
+  peer.on('connection', (connection) => {
+    setupConnection(connection);
+    isMultiplayer = true;
+    status.textContent = 'PLAYER JOINED! STARTING...';
+    createRemoteBike();
+
+    setTimeout(() => {
+      document.getElementById('lobby-screen').style.display = 'none';
+      document.getElementById('start-screen').style.display = 'flex';
+    }, 1000);
+  });
+
+  peer.on('error', (err) => {
+    status.textContent = 'ERROR: ' + err.type;
+  });
+}
+
+function joinRoom() {
+  const code = document.getElementById('room-input').value.trim().toUpperCase();
+  if (!code) return;
+
+  const status = document.getElementById('lobby-status');
+  status.textContent = 'CONNECTING...';
+
+  peer = new Peer();
+  isHost = false;
+
+  peer.on('open', () => {
+    const connection = peer.connect('wheelie-' + code);
+    connection.on('open', () => {
+      setupConnection(connection);
+      isMultiplayer = true;
+      createRemoteBike();
+      status.textContent = 'CONNECTED!';
+
+      setTimeout(() => {
+        document.getElementById('lobby-screen').style.display = 'none';
+        document.getElementById('start-screen').style.display = 'flex';
+      }, 1000);
+    });
+    connection.on('error', () => {
+      status.textContent = 'FAILED TO CONNECT';
+    });
+  });
+
+  peer.on('error', (err) => {
+    status.textContent = 'ERROR: ' + err.type;
+  });
+}
+
 function initMediaPipe() {
   // MediaPipe 미로드 시 키보드 모드로 바로 전환
   if (typeof Hands === 'undefined' || typeof Camera === 'undefined') {
@@ -982,26 +1167,99 @@ function gameLoop() {
         }
 
         if (trickScore > 0) {
-          trickName = tricks.join(' + ');
           score += trickScore;
-          // 즉시 이전 텍스트 교체
-          hudTaunt.className = 'hud-taunt';
-          hudTaunt.innerHTML = `${trickName}<br><span style="font-size:${Math.min(24, 14 + trickScore/500)}px">+${trickScore}</span>`;
-          if (trickScore >= 10000) {
-            hudTaunt.classList.add('trick-epic');
-            hudTaunt.style.color = '#E040A0';
-          } else if (trickScore >= 5000) {
-            hudTaunt.classList.add('trick-big');
-            hudTaunt.style.color = '#7E57C2';
-          } else if (trickScore >= 2000) {
-            hudTaunt.classList.add('trick-mid');
-            hudTaunt.style.color = '#FFD600';
+
+          // === 착지 점수 오버레이 표시 ===
+          const ov = document.getElementById('trick-overlay');
+          const tMult = document.getElementById('trick-mult');
+          const tName = document.getElementById('trick-name');
+          const tAir = document.getElementById('trick-air');
+          const tScore = document.getElementById('trick-score');
+
+          // 랜덤 기울기 헬퍼 (base ± range)
+          const rRot = (base, range) => base + (Math.random() - 0.5) * range * 2;
+
+          // 배수 (오른쪽 위, 작게)
+          if (airMult > 1) {
+            tMult.textContent = `X${airMult}`;
+            tMult.style.fontSize = `${14 + airMult * 2}px`;
+            tMult.style.transform = `rotate(${rRot(-15, 5)}deg)`;
           } else {
-            hudTaunt.classList.add('trick-small');
-            hudTaunt.style.color = '#FFD600';
+            tMult.textContent = '';
           }
-          hudTaunt.style.display = 'block';
+
+          // 플립 이름 (중앙, 크게, 기울어짐)
+          const flipText = flips >= 1 ? (prefix + ['','FLIP!','DOUBLE FLIP!!','TRIPLE FLIP!!!'][Math.min(flips,3)]) : '';
+          tName.textContent = flipText;
+          const flipSize = flips >= 3 ? 42 : flips >= 2 ? 34 : flips >= 1 ? 26 : 0;
+          tName.style.fontSize = `${flipSize}px`;
+          tName.style.color = flips >= 3 ? '#E040A0' : flips >= 2 ? '#7E57C2' : '#FFD600';
+          tName.style.transform = `translate(-50%,0) rotate(${rRot(-8, 4)}deg)`;
+          if (flips >= 2) tName.style.animation = 'trickPulse 0.5s infinite';
+          else tName.style.animation = 'none';
+
+          // 에어타임 (왼쪽 중간, 시간 길수록 커짐)
+          const airSec = landedAirTime.toFixed(2);
+          const airSize = Math.min(24, 12 + landedAirTime * 2);
+          let atr, atg, atb;
+          if (landedAirTime < 2) {
+            const t = landedAirTime / 2;
+            atr = Math.floor(76+(255-76)*t); atg = Math.floor(175+(214-175)*t); atb = Math.floor(80-80*t);
+          } else if (landedAirTime < 4) {
+            const t = (landedAirTime-2) / 2;
+            atr = Math.floor(255+(229-255)*t); atg = Math.floor(214+(57-214)*t); atb = Math.floor(53*t);
+          } else { atr=229; atg=57; atb=53; }
+          tAir.textContent = `AIR TIME : ${airSec}`;
+          tAir.style.fontSize = `${airSize}px`;
+          tAir.style.color = `rgb(${atr},${atg},${atb})`;
+          tAir.style.transform = `rotate(${rRot(-5, 3)}deg)`;
+
+          // 합계 점수 (중앙 아래, 매우 크게 - 점수 비례)
+          const scoreSize = Math.min(56, 24 + trickScore / 300);
+          tScore.textContent = `+ ${trickScore.toLocaleString()}`;
+          tScore.style.fontSize = `${scoreSize}px`;
+          tScore.style.transform = `translate(-50%,0) rotate(${rRot(0, 3)}deg)`;
+          if (trickScore >= 10000) tScore.style.animation = 'trickPulse 0.5s infinite';
+          else if (trickScore >= 5000) tScore.style.animation = 'trickFlash 0.3s infinite';
+          else tScore.style.animation = 'none';
+
+          ov.style.display = 'block';
           tauntTimer = 2.5;
+          hudTaunt.style.display = 'none';
+
+          // 트리플플립+ 불타는 도트 효과
+          if (flips >= 3) {
+            // 기존 fire-overlay 제거
+            document.querySelectorAll('.fire-overlay').forEach(e => e.remove());
+            const fireDiv = document.createElement('div');
+            fireDiv.className = 'fire-overlay';
+            document.getElementById('hud').appendChild(fireDiv);
+            const colors = ['#FF4400','#FF6600','#FF8800','#FFAA00','#FFCC00','#FFE040','#FF2200'];
+            // 위아래에서 불 도트 반복 생성
+            let fireCount = 0;
+            const fireInterval = setInterval(() => {
+              for (let i = 0; i < 6; i++) {
+                const dot = document.createElement('div');
+                dot.className = 'fire-dot';
+                dot.style.backgroundColor = colors[Math.floor(Math.random()*colors.length)];
+                dot.style.left = `${Math.random() * 100}%`;
+                dot.style.width = dot.style.height = `${6 + Math.random()*8}px`;
+                // 위 또는 아래에서
+                if (Math.random() > 0.5) {
+                  dot.style.bottom = '0';
+                  dot.style.animation = 'fireRise 0.5s ease-out forwards';
+                } else {
+                  dot.style.top = '0';
+                  dot.style.animation = 'fireRise 0.5s ease-out forwards';
+                  dot.style.animationName = 'fireRiseDown';
+                }
+                fireDiv.appendChild(dot);
+                setTimeout(() => dot.remove(), 600);
+              }
+              fireCount++;
+              if (fireCount > 40) { clearInterval(fireInterval); fireDiv.remove(); }
+            }, 50);
+          }
         }
 
         // 착지 시 바퀴 들린 각도 → 윌리 값으로 전환
@@ -1075,10 +1333,14 @@ function gameLoop() {
     if (tauntTimer <= 0) hudTaunt.style.display = 'none';
   }
 
-  // tauntTimer 카운트다운 + 텍스트 보장
+  // tauntTimer 카운트다운
   tauntTimer = Math.max(0, tauntTimer - dt);
-  // tauntTimer가 남아있으면 무조건 표시 (어떤 뷰에서든)
-  if (tauntTimer > 0) hudTaunt.style.display = 'block';
+  if (tauntTimer > 0) {
+    // 오버레이 또는 hudTaunt 유지
+  } else {
+    const ov = document.getElementById('trick-overlay');
+    if (ov) ov.style.display = 'none';
+  }
 
   // === 코인 수집 ===
   for (let i = coins.length - 1; i >= 0; i--) {
@@ -1106,7 +1368,8 @@ function gameLoop() {
   // === 충돌 (점프 중이면 통과) ===
   if (invincibleTimer <= 0 && jumpY < 0.5 && checkCollision()) die('crash');
 
-  // === AI 레이서 업데이트 ===
+  // === AI 레이서 업데이트 (멀티 시 비활성) ===
+  if (isMultiplayer) { aiRacers.forEach(a => a.group.visible = false); } else {
   for (const ai of aiRacers) {
     // 속도 변동 (플레이어 근처 유지)
     const distZ = bikeZ - ai.z;
@@ -1128,6 +1391,7 @@ function gameLoop() {
     ai.group.position.set(ai.x, 0, ai.z);
     ai.group.rotation.x = -ai.wheelieAngle * Math.PI / 180;
   }
+  } // end if !isMultiplayer
 
   // (래그돌은 사망 루프에서 처리)
 
@@ -1135,7 +1399,7 @@ function gameLoop() {
   updateTrack();
 
   // === 점수 ===
-  score = Math.max(score, Math.floor(bikeZ * 10));
+  score = Math.max(score, Math.floor(bikeZ * 1));
 
   // === 카메라 ===
   if (inAirNow && !tauntLookBack) {
@@ -1400,6 +1664,12 @@ function gameLoop() {
   // === HUD ===
   hudScore.textContent = `SCORE: ${score}`;
   hudSpeed.textContent = `${Math.floor(effSpeed * 3.6)} km/h`;
+  // P2 점수
+  const hudP2 = document.getElementById('hud-p2');
+  if (isMultiplayer && hudP2) {
+    hudP2.style.display = 'block';
+    hudP2.textContent = `P2: ${remoteState.score || 0}`;
+  }
   const wp = wheelieAngle / 90;
   hudWLabel.textContent = `WHEELIE: ${Math.floor(wp * 100)}%`;
   hudGauge.style.width = `${wp * 100}%`;
@@ -1408,6 +1678,12 @@ function gameLoop() {
   else if (wp < 0.7) { hudGauge.style.backgroundColor = '#FFD600'; hudWLabel.style.color = '#FFD600'; }
   else if (wp < 0.85) { hudGauge.style.backgroundColor = '#FB8C00'; hudWLabel.style.color = '#FB8C00'; }
   else { hudGauge.style.backgroundColor = '#E53935'; hudWLabel.style.color = '#E53935'; }
+
+  // === 멀티플레이어 동기화 ===
+  if (isMultiplayer) {
+    sendState();
+    updateRemoteBike(dt);
+  }
 
   renderer.render(scene, camera);
 }
