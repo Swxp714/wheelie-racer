@@ -90,22 +90,6 @@
     position:absolute; width:8px; height:8px;
     animation: fireRise 0.6s ease-out forwards;
   }
-  /* 스피드 라인 */
-  #speed-lines {
-    position:fixed; inset:0; pointer-events:none; z-index:9; overflow:hidden;
-    display:none;
-  }
-  .speed-line {
-    position:absolute;
-    background:#fff;
-    opacity:0.4;
-    image-rendering:pixelated;
-  }
-  .speed-dot {
-    position:absolute;
-    width:4px; height:4px;
-    image-rendering:pixelated;
-  }
   .hud-controls {
     position:absolute; bottom:20px; left:24px;
     font-size:7px; color:#8888AA; line-height:2;
@@ -264,7 +248,6 @@
 </div>
 
 <!-- 속도 이펙트 -->
-<div id="speed-lines"></div>
 
 <!-- HUD -->
 <div id="hud">
@@ -1584,8 +1567,11 @@ function gameLoop() {
   }
 
   // 바이크 위치/회전
-  // 도로 높이 + 점프 높이
-  const roadHeight = getRoadHeight(bikeZ);
+  // 도로 높이 + 점프 높이 (부드럽게 보간해서 꺼짐 방지)
+  const targetRoadH = getRoadHeight(bikeZ);
+  if (typeof window._smoothRoadH === 'undefined') window._smoothRoadH = targetRoadH;
+  window._smoothRoadH += (targetRoadH - window._smoothRoadH) * Math.min(1, 15 * dt);
+  const roadHeight = window._smoothRoadH;
   bike.position.set(bikeX, roadHeight + jumpY, bikeZ);
   if (inAirStunt) {
     // 공중: 스턴트 회전 (양수=백플립, 음수=리버스)
@@ -1970,56 +1956,19 @@ function gameLoop() {
   const speedRatio = effSpeed / maxSpeed; // 0~1
 
   // FOV 변화 (고속일수록 넓어짐)
-  const targetFov = 75 + speedRatio * 15; // 75~90
+  const targetFov = 75 + speedRatio * 25; // 75~100 (더 광각)
   camera.fov += (targetFov - camera.fov) * 3 * dt;
   camera.updateProjectionMatrix();
 
-  // 스피드 라인 (바람 효과)
-  const slDiv = document.getElementById('speed-lines');
-  if (speedRatio > 0.4) {
-    slDiv.style.display = 'block';
-    // 속도에 비례해서 라인 생성
-    const dotCount = Math.floor((speedRatio - 0.4) * 20);
-    if (Math.random() < speedRatio * 0.9) {
-      for (let i = 0; i < dotCount; i++) {
-        // 도트 체인 (3~6개 도트가 줄지어 날아감)
-        const chainLen = 3 + Math.floor(Math.random() * 4);
-        const side = Math.random() > 0.5;
-        const yPos = Math.random() * 100;
-        const angle = -5 + Math.random() * 10;
-        const colors = ['#fff','#ddd','#bbb','#FFD600','#85D2FE'];
-        const dotColor = colors[Math.floor(Math.random() * colors.length)];
-        const dotSize = 3 + Math.floor(Math.random() * 4); // 3~6px 픽셀
-
-        for (let j = 0; j < chainLen; j++) {
-          const dot = document.createElement('div');
-          dot.className = 'speed-dot';
-          dot.style.width = dot.style.height = `${dotSize}px`;
-          dot.style.backgroundColor = dotColor;
-          dot.style.top = `${yPos + j * 0.3}%`;
-          dot.style.opacity = (0.2 + speedRatio * 0.5) * (1 - j/chainLen);
-          const delay = j * 20;
-          const travelTime = 0.12 + Math.random() * 0.15;
-
-          if (side) {
-            dot.style.right = `${-10 - j * (dotSize + 2)}px`;
-            dot.style.transition = `transform ${travelTime}s linear, opacity ${travelTime * 0.8}s`;
-            setTimeout(() => { dot.style.transform = `translateX(-${innerWidth * 0.7}px) rotate(${angle}deg)`; dot.style.opacity = '0'; }, 10 + delay);
-          } else {
-            dot.style.left = `${-10 - j * (dotSize + 2)}px`;
-            dot.style.transition = `transform ${travelTime}s linear, opacity ${travelTime * 0.8}s`;
-            setTimeout(() => { dot.style.transform = `translateX(${innerWidth * 0.7}px) rotate(${angle}deg)`; dot.style.opacity = '0'; }, 10 + delay);
-          }
-          slDiv.appendChild(dot);
-          setTimeout(() => dot.remove(), 500);
-        }
-      }
-    }
+  // 속도감: 안개 가까이 + 광각 (FOV 위에서 이미 처리)
+  const cfg2 = MAP_CONFIG[selectedMap] || MAP_CONFIG[0];
+  if (speedRatio > 0.3) {
+    scene.fog.near = cfg2.fogNear - speedRatio * cfg2.fogNear * 0.5;
+    scene.fog.far = cfg2.fogFar - speedRatio * 50;
   } else {
-    slDiv.style.display = 'none';
+    scene.fog.near = cfg2.fogNear;
+    scene.fog.far = cfg2.fogFar;
   }
-
-  // (비네팅 제거됨)
 
   // 뒷바퀴 먼지 도트 (3D 복셀 파티클)
   if (speed > 5 && !inAirStunt && Math.random() < speedRatio * 0.8) {
