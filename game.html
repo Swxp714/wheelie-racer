@@ -106,12 +106,6 @@
     width:4px; height:4px;
     image-rendering:pixelated;
   }
-  /* 비네팅 */
-  #vignette {
-    position:fixed; inset:0; pointer-events:none; z-index:8;
-    background: radial-gradient(ellipse at center, transparent 50%, rgba(0,0,0,0) 100%);
-    display:none;
-  }
   .hud-controls {
     position:absolute; bottom:20px; left:24px;
     font-size:7px; color:#8888AA; line-height:2;
@@ -271,7 +265,6 @@
 
 <!-- 속도 이펙트 -->
 <div id="speed-lines"></div>
-<div id="vignette"></div>
 
 <!-- HUD -->
 <div id="hud">
@@ -675,38 +668,53 @@ function createSegment(z) {
 
   // 도로 높이 (세그먼트 중심)
   const roadY = getRoadHeight(z);
-  const roadYFront = getRoadHeight(z + SEG_LEN/2);
-  const roadYBack = getRoadHeight(z - SEG_LEN/2);
-  const roadTilt = Math.atan2(roadYFront - roadYBack, SEG_LEN);
-
-  // 도로
-  const road = box(12, 0.2, SEG_LEN, cfg.roadColor);
-  road.position.set(0, roadY, z);
-  road.rotation.x = -roadTilt;
+  // 도로 (곡면 메시 - 터레인 높이를 따라감)
+  const roadSegsZ = 12; // Z방향 분할 수
+  const roadGeom = new THREE.PlaneGeometry(12, SEG_LEN, 2, roadSegsZ);
+  roadGeom.rotateX(-Math.PI / 2);
+  const roadPos = roadGeom.attributes.position;
+  for (let vi = 0; vi < roadPos.count; vi++) {
+    const vz = roadPos.getZ(vi) + z;
+    roadPos.setY(vi, getRoadHeight(vz));
+  }
+  roadGeom.computeVertexNormals();
+  const roadMat = new THREE.MeshLambertMaterial({ color: cfg.roadColor, flatShading: true });
+  const road = new THREE.Mesh(roadGeom, roadMat);
+  road.position.set(0, 0, z);
   road.receiveShadow = true;
   seg.add(road);
 
-  // 중앙선 (점선)
+  // 중앙선 (도로 위에 밀착)
   for (let i = -SEG_LEN/2 + 1; i < SEG_LEN/2; i += 3) {
     const localZ = z + i;
-    const localY = getRoadHeight(localZ);
-    const dash = box(0.2, 0.01, 1.5, 0xFFD600);
-    dash.position.set(0, localY + 0.12, localZ);
+    const localY = getRoadHeight(localZ) + 0.05;
+    const nextY = getRoadHeight(localZ + 1.5) + 0.05;
+    const dash = box(0.2, 0.03, 1.5, 0xFFD600);
+    dash.position.set(0, (localY + nextY) / 2, localZ + 0.75);
+    dash.rotation.x = -Math.atan2(nextY - localY, 1.5);
     seg.add(dash);
   }
 
-  // 가장자리
+  // 가장자리 (곡면)
   for (const side of [-6, 6]) {
-    const edge = box(0.25, 0.2, SEG_LEN, 0xFFFFFF);
-    edge.position.set(side, roadY + 0.05, z);
-    edge.rotation.x = -roadTilt;
+    const edgeGeom = new THREE.PlaneGeometry(0.3, SEG_LEN, 1, roadSegsZ);
+    edgeGeom.rotateX(-Math.PI / 2);
+    const ePos = edgeGeom.attributes.position;
+    for (let vi = 0; vi < ePos.count; vi++) {
+      const vz = ePos.getZ(vi) + z;
+      ePos.setY(vi, getRoadHeight(vz) + 0.08);
+    }
+    edgeGeom.computeVertexNormals();
+    const edgeMat = new THREE.MeshLambertMaterial({ color: 0xFFFFFF, flatShading: true });
+    const edge = new THREE.Mesh(edgeGeom, edgeMat);
+    edge.position.set(side, 0, z);
     seg.add(edge);
   }
 
   // 사이드 터레인 (좌우 산/언덕)
   for (const sideX of [-1, 1]) {
     const terrW = 30, terrD = SEG_LEN;
-    const terrSegs = 8;
+    const terrSegs = 12; // 해상도 높임
     const geom = new THREE.PlaneGeometry(terrW, terrD, terrSegs, terrSegs);
     geom.rotateX(-Math.PI / 2);
     const pos = geom.attributes.position;
