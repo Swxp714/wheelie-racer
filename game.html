@@ -160,6 +160,65 @@
 </div>
 
 <!-- 시작 화면 -->
+<!-- 맵 선택 화면 -->
+<div id="map-screen" style="
+  position:fixed;inset:0;z-index:150;background:#1a1a2e;
+  display:none;flex-direction:column;align-items:center;justify-content:center;
+  font-family:'Press Start 2P',monospace;color:#fff;text-align:center;">
+  <h2 style="font-size:20px;color:#FFD600;margin-bottom:30px;">SELECT MAP</h2>
+  <div style="display:flex;gap:12px;flex-wrap:wrap;justify-content:center;max-width:800px;">
+    <div class="map-card" onclick="selectMap(0)" style="cursor:pointer;background:#222244;border:3px solid #333366;padding:16px 20px;width:140px;text-align:center;transition:border-color 0.1s;">
+      <div style="font-size:24px;margin-bottom:8px;">🌿</div>
+      <div style="font-size:10px;color:#4CAF50;margin-bottom:4px;">GREEN VALLEY</div>
+      <div style="font-size:8px;color:#888;">★☆☆☆☆</div>
+    </div>
+    <div class="map-card" onclick="selectMap(1)" style="cursor:pointer;background:#222244;border:3px solid #333366;padding:16px 20px;width:140px;text-align:center;transition:border-color 0.1s;">
+      <div style="font-size:24px;margin-bottom:8px;">🌲</div>
+      <div style="font-size:10px;color:#388E3C;margin-bottom:4px;">PINE RIDGE</div>
+      <div style="font-size:8px;color:#888;">★★☆☆☆</div>
+    </div>
+    <div class="map-card" onclick="selectMap(2)" style="cursor:pointer;background:#222244;border:3px solid #333366;padding:16px 20px;width:140px;text-align:center;transition:border-color 0.1s;">
+      <div style="font-size:24px;margin-bottom:8px;">🪨</div>
+      <div style="font-size:10px;color:#FB8C00;margin-bottom:4px;">ROCKY PASS</div>
+      <div style="font-size:8px;color:#888;">★★★☆☆</div>
+    </div>
+    <div class="map-card" onclick="selectMap(3)" style="cursor:pointer;background:#222244;border:3px solid #333366;padding:16px 20px;width:140px;text-align:center;transition:border-color 0.1s;">
+      <div style="font-size:24px;margin-bottom:8px;">❄️</div>
+      <div style="font-size:10px;color:#5BC0EB;margin-bottom:4px;">SNOW PEAK</div>
+      <div style="font-size:8px;color:#888;">★★★★☆</div>
+    </div>
+    <div class="map-card" onclick="selectMap(4)" style="cursor:pointer;background:#222244;border:3px solid #333366;padding:16px 20px;width:140px;text-align:center;transition:border-color 0.1s;">
+      <div style="font-size:24px;margin-bottom:8px;">🌋</div>
+      <div style="font-size:10px;color:#E53935;margin-bottom:4px;">DEATH MOUNTAIN</div>
+      <div style="font-size:8px;color:#888;">★★★★★</div>
+    </div>
+  </div>
+</div>
+
+<!-- 모드 선택 화면 -->
+<div id="mode-screen" style="
+  position:fixed;inset:0;z-index:150;background:#1a1a2e;
+  display:none;flex-direction:column;align-items:center;justify-content:center;
+  font-family:'Press Start 2P',monospace;color:#fff;text-align:center;">
+  <h2 style="font-size:20px;color:#FFD600;margin-bottom:10px;">SELECT MODE</h2>
+  <div id="mode-map-name" style="font-size:12px;color:#888;margin-bottom:30px;"></div>
+  <div style="display:flex;gap:20px;">
+    <div onclick="selectMode('uphill')" style="cursor:pointer;background:#222244;border:3px solid #333366;padding:24px 32px;text-align:center;transition:border-color 0.1s;width:200px;">
+      <div style="font-size:36px;margin-bottom:12px;">⬆️</div>
+      <div style="font-size:14px;color:#E53935;margin-bottom:8px;">UPHILL</div>
+      <div style="font-size:8px;color:#888;line-height:2;">CLIMB TO THE TOP<br>HARDER WHEELIE<br>STAMINA CHALLENGE</div>
+    </div>
+    <div onclick="selectMode('downhill')" style="cursor:pointer;background:#222244;border:3px solid #333366;padding:24px 32px;text-align:center;transition:border-color 0.1s;width:200px;">
+      <div style="font-size:36px;margin-bottom:12px;">⬇️</div>
+      <div style="font-size:14px;color:#4CAF50;margin-bottom:8px;">DOWNHILL</div>
+      <div style="font-size:8px;color:#888;line-height:2;">RACE TO THE BOTTOM<br>SPEED CONTROL<br>STUNT PARADISE</div>
+    </div>
+  </div>
+  <button onclick="document.getElementById('mode-screen').style.display='none';document.getElementById('map-screen').style.display='flex';" style="
+    font-family:'Press Start 2P',monospace;font-size:8px;padding:10px 20px;
+    background:#333366;color:#888;border:none;cursor:pointer;margin-top:24px;">BACK</button>
+</div>
+
 <div id="start-screen" style="display:none">
   <h1>WHEELIE<br>RACER</h1>
   <p>
@@ -281,6 +340,11 @@ let isHost = false;
 let remoteBike = null;
 let remoteRider = null;
 let remoteState = { x:0, z:0, y:0, rotX:0, rotZ:0, speed:0, score:0, dead:false };
+
+// 맵/모드 선택
+let selectedMap = 0;
+let selectedMode = 'downhill';
+const MAP_NAMES = ['GREEN VALLEY','PINE RIDGE','ROCKY PASS','SNOW PEAK','DEATH MOUNTAIN'];
 
 // 트랙
 const SEG_LEN = 30;
@@ -725,6 +789,19 @@ function genRoomCode() {
 function startSolo() {
   isMultiplayer = false;
   document.getElementById('lobby-screen').style.display = 'none';
+  document.getElementById('map-screen').style.display = 'flex';
+}
+
+function selectMap(idx) {
+  selectedMap = idx;
+  document.getElementById('map-screen').style.display = 'none';
+  document.getElementById('mode-screen').style.display = 'flex';
+  document.getElementById('mode-map-name').textContent = MAP_NAMES[idx];
+}
+
+function selectMode(mode) {
+  selectedMode = mode;
+  document.getElementById('mode-screen').style.display = 'none';
   document.getElementById('start-screen').style.display = 'flex';
 }
 
@@ -758,7 +835,7 @@ function createRoom() {
 
     setTimeout(() => {
       document.getElementById('lobby-screen').style.display = 'none';
-      document.getElementById('start-screen').style.display = 'flex';
+      document.getElementById('map-screen').style.display = 'flex';
     }, 1000);
   });
 
@@ -787,7 +864,7 @@ function joinRoom() {
 
       setTimeout(() => {
         document.getElementById('lobby-screen').style.display = 'none';
-        document.getElementById('start-screen').style.display = 'flex';
+        document.getElementById('map-screen').style.display = 'flex';
       }, 1000);
     });
     connection.on('error', () => {
@@ -1838,6 +1915,8 @@ window.startSolo = startSolo;
 window.createRoom = createRoom;
 window.joinRoom = joinRoom;
 window.startGame = startGame;
+window.selectMap = selectMap;
+window.selectMode = selectMode;
 </script>
 </body>
 </html>
