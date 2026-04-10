@@ -255,6 +255,20 @@
   <button id="start-btn" onclick="startGame()">START</button>
 </div>
 
+<!-- 결과 화면 -->
+<div id="result-screen" style="
+  position:fixed;inset:0;z-index:300;background:rgba(26,26,46,0.95);
+  display:none;flex-direction:column;align-items:center;justify-content:center;
+  font-family:'Press Start 2P',monospace;color:#fff;text-align:center;">
+  <h2 id="result-title" style="font-size:28px;color:#FFD600;text-shadow:3px 3px 0 #E53935;margin-bottom:24px;">RACE FINISHED!</h2>
+  <div id="result-list" style="margin-bottom:24px;line-height:3;"></div>
+  <div id="result-score" style="font-size:14px;color:#888;margin-bottom:24px;"></div>
+  <div style="display:flex;gap:12px;">
+    <button onclick="location.reload()" style="font-family:'Press Start 2P',monospace;font-size:10px;padding:12px 24px;background:#E53935;color:#fff;border:none;cursor:pointer;">MENU</button>
+    <button onclick="restartRace()" style="font-family:'Press Start 2P',monospace;font-size:10px;padding:12px 24px;background:#4CAF50;color:#fff;border:none;cursor:pointer;">RETRY</button>
+  </div>
+</div>
+
 <!-- 속도 이펙트 -->
 <div id="speed-lines"></div>
 <div id="vignette"></div>
@@ -264,6 +278,13 @@
   <div class="hud-score" id="hud-score">SCORE: 0</div>
   <div class="hud-speed" id="hud-speed">0 km/h</div>
   <div id="hud-p2" style="position:absolute;top:20px;right:24px;margin-top:30px;font-family:'Press Start 2P',monospace;font-size:10px;color:#1E88E5;text-shadow:1px 1px 0 #000;display:none;">P2: 0</div>
+  <!-- 레이스 HUD -->
+  <div id="hud-rank" style="position:absolute;top:80px;left:24px;font-family:'Press Start 2P',monospace;font-size:16px;text-shadow:2px 2px 0 #000;display:none;"></div>
+  <div id="hud-timer" style="position:absolute;top:20px;left:50%;transform:translateX(-50%);font-family:'Press Start 2P',monospace;font-size:12px;color:#fff;text-shadow:2px 2px 0 #000;"></div>
+  <div id="hud-progress" style="position:absolute;bottom:24px;left:50%;transform:translateX(-50%);width:300px;height:10px;background:#222244;border:1px solid #333366;display:none;">
+    <div id="hud-progress-fill" style="height:100%;width:0%;background:#FFD600;"></div>
+    <div id="hud-progress-label" style="position:absolute;top:-16px;left:0;font-family:'Press Start 2P',monospace;font-size:7px;color:#888;width:100%;text-align:center;"></div>
+  </div>
   <div class="hud-wheelie-label" id="hud-wlabel">WHEELIE: 0%</div>
   <div class="hud-gauge"><div class="hud-gauge-fill" id="hud-gauge"></div></div>
   <div class="hud-status" id="hud-status">LOADING...</div>
@@ -394,6 +415,14 @@ let remoteState = { x:0, z:0, y:0, rotX:0, rotZ:0, speed:0, score:0, dead:false 
 // 맵/모드 선택
 let selectedMap = 0;
 let selectedMode = 'downhill';
+
+// 레이스 시스템
+let raceDistance = 0;
+let raceFinished = false;
+let raceTime = 0;
+let raceResults = []; // {name, time, score}
+let playerRank = 0;
+const MAP_DISTANCES = [1500, 2000, 2500, 3000, 4000]; // 맵별 결승선 거리
 const MAP_NAMES = ['GREEN VALLEY','PINE RIDGE','ROCKY PASS','SNOW PEAK','DEATH MOUNTAIN'];
 const MAP_CONFIG = [
   { // GREEN VALLEY - 완만
@@ -2017,6 +2046,49 @@ function gameLoop() {
   else if (wp < 0.85) { hudGauge.style.backgroundColor = '#FB8C00'; hudWLabel.style.color = '#FB8C00'; }
   else { hudGauge.style.backgroundColor = '#E53935'; hudWLabel.style.color = '#E53935'; }
 
+  // === 레이스 시스템 ===
+  if (!raceFinished) {
+    raceTime += dt;
+
+    // 타이머 표시
+    const rm = Math.floor(raceTime / 60);
+    const rs = Math.floor(raceTime % 60);
+    const rms = Math.floor((raceTime % 1) * 100);
+    document.getElementById('hud-timer').textContent = `${String(rm).padStart(2,'0')}:${String(rs).padStart(2,'0')}.${String(rms).padStart(2,'0')}`;
+
+    // 진행바
+    const progress = Math.min(1, bikeZ / raceDistance);
+    document.getElementById('hud-progress-fill').style.width = `${progress * 100}%`;
+    document.getElementById('hud-progress-label').textContent = `${Math.floor(progress * 100)}% - ${Math.floor(raceDistance - bikeZ)}m`;
+
+    // 순위 계산 (AI 포함)
+    const allPositions = [{name:'YOU', z:bikeZ, isPlayer:true}];
+    for (let i = 0; i < aiRacers.length; i++) {
+      allPositions.push({name:`AI-${i+1}`, z:aiRacers[i].z});
+    }
+    allPositions.sort((a,b) => b.z - a.z);
+    playerRank = allPositions.findIndex(p => p.isPlayer) + 1;
+
+    const rankColors = ['#FFD600','#CCCCCC','#CD7F32','#888888'];
+    const rankNames = ['1ST','2ND','3RD','4TH'];
+    const hudRank = document.getElementById('hud-rank');
+    hudRank.textContent = rankNames[playerRank - 1] || `${playerRank}TH`;
+    hudRank.style.color = rankColors[playerRank - 1] || '#888';
+
+    // 결승선 도착 체크
+    if (bikeZ >= raceDistance) {
+      finishRace();
+    }
+
+    // AI 결승선 체크
+    for (const ai of aiRacers) {
+      if (ai.z >= raceDistance && !ai.finished) {
+        ai.finished = true;
+        ai.finishTime = raceTime;
+      }
+    }
+  }
+
   // === 멀티플레이어 동기화 ===
   if (isMultiplayer) {
     sendState();
@@ -2147,6 +2219,73 @@ function respawn() {
 // ============================================================
 //  START
 // ============================================================
+function finishRace() {
+  raceFinished = true;
+  speed = 0;
+
+  // 결과 수집
+  const results = [{name:'YOU', time:raceTime, score:score, isPlayer:true}];
+  for (let i = 0; i < aiRacers.length; i++) {
+    const ai = aiRacers[i];
+    const t = ai.finished ? ai.finishTime : raceTime + 5 + Math.random() * 10;
+    results.push({name:`AI-${i+1}`, time:t, score:Math.floor(Math.random()*score*0.8)});
+  }
+  results.sort((a,b) => a.time - b.time);
+
+  const rank = results.findIndex(r => r.isPlayer) + 1;
+  const medals = ['','1ST','2ND','3RD','4TH'];
+  const mColors = ['','#FFD600','#CCCCCC','#CD7F32','#888888'];
+
+  // 결과 화면
+  const titleEl = document.getElementById('result-title');
+  if (rank === 1) { titleEl.textContent = 'YOU WIN!'; titleEl.style.color = '#FFD600'; }
+  else if (rank <= 3) { titleEl.textContent = `${medals[rank]} PLACE`; titleEl.style.color = mColors[rank]; }
+  else { titleEl.textContent = 'RACE FINISHED'; titleEl.style.color = '#888'; }
+
+  let listHTML = '';
+  for (let i = 0; i < results.length; i++) {
+    const r = results[i];
+    const tm = Math.floor(r.time / 60);
+    const ts = Math.floor(r.time % 60);
+    const tms = Math.floor((r.time % 1) * 100);
+    const timeStr = `${String(tm).padStart(2,'0')}:${String(ts).padStart(2,'0')}.${String(tms).padStart(2,'0')}`;
+    const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '  ';
+    const color = r.isPlayer ? '#FFD600' : '#888';
+    const nameStr = r.isPlayer ? '<span style="color:#FFD600">YOU</span>' : `<span style="color:#888">${r.name}</span>`;
+    listHTML += `<div style="font-size:${i===0?14:11}px;color:${color}">${medal} ${i+1}. ${nameStr} ${timeStr}</div>`;
+  }
+  document.getElementById('result-list').innerHTML = listHTML;
+  document.getElementById('result-score').innerHTML = `TOTAL SCORE: <span style="color:#FFD600;font-size:18px">${score.toLocaleString()}</span>`;
+  document.getElementById('result-screen').style.display = 'flex';
+}
+
+function restartRace() {
+  // 리셋
+  document.getElementById('result-screen').style.display = 'none';
+  bikeZ = 0; bikeX = 0; speed = 0; score = 0;
+  wheelieAngle = 0; wheelieTarget = 0;
+  jumpY = 0; jumpVel = 0; isJumping = false;
+  backflipAngle = 0; backflipActive = false;
+  isDead = false; raceFinished = false; raceTime = 0;
+  airTime = 0;
+  bike.position.set(0, 0, 0);
+  bike.rotation.set(0, 0, 0);
+  bike.visible = true;
+  if (fpvGroup) fpvGroup.visible = true;
+  if (bikeBodyGroup) bikeBodyGroup.visible = false;
+  if (riderGroup) riderGroup.visible = false;
+  camera.position.set(0, 2.2, 0.3);
+  // AI 리셋
+  for (let i = 0; i < aiRacers.length; i++) {
+    const ai = aiRacers[i];
+    ai.z = -5 - i * 3; ai.x = (i-1) * 2.5;
+    ai.speed = 14 + Math.random() * 8;
+    ai.finished = false; ai.finishTime = 0;
+    ai.group.position.set(ai.x, 0, ai.z);
+  }
+  hudDeath.style.display = 'none';
+}
+
 function startGame() {
   document.getElementById('start-screen').style.display = 'none';
 
@@ -2154,6 +2293,16 @@ function startGame() {
   const cfg = MAP_CONFIG[selectedMap] || MAP_CONFIG[0];
   scene.background = new THREE.Color(cfg.skyColor);
   scene.fog = new THREE.Fog(cfg.fogColor, cfg.fogNear, cfg.fogFar);
+
+  // 레이스 초기화
+  raceDistance = MAP_DISTANCES[selectedMap] || 1500;
+  raceFinished = false;
+  raceTime = 0;
+  raceResults = [];
+  playerRank = 0;
+  document.getElementById('hud-rank').style.display = 'block';
+  document.getElementById('hud-progress').style.display = 'block';
+  document.getElementById('result-screen').style.display = 'none';
 
   gameStarted = true;
   clock.start();
@@ -2174,6 +2323,7 @@ window.joinRoom = joinRoom;
 window.startGame = startGame;
 window.selectMap = selectMap;
 window.selectMode = selectMode;
+window.restartRace = restartRace;
 </script>
 </body>
 </html>
