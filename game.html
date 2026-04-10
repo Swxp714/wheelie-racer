@@ -628,11 +628,17 @@ function createAIRacers() {
 function getRoadHeight(z) {
   const cfg = MAP_CONFIG[selectedMap] || MAP_CONFIG[0];
   const dir = selectedMode === 'uphill' ? 1 : -1;
-  // 기본 경사 (업힐/다운힐)
-  const slope = z * 0.015 * dir * (cfg.hillAmp / 10);
-  // 노이즈 언덕
-  const hill = fbm(0, z, 3, cfg.hillFreq, cfg.hillAmp);
-  return slope + hill;
+
+  // 1. 기본 경사 (업힐/다운힐 - 일관된 방향)
+  const slopeGrade = 0.012 * (cfg.hillAmp / 10); // 맵 난이도에 비례
+  const slope = z * slopeGrade * dir;
+
+  // 2. 부드러운 롤링힐 (사인파 2개 겹침 - 완만한 오르막/내리막)
+  const roll1 = Math.sin(z * 0.008) * cfg.hillAmp * 0.15;  // 긴 파장
+  const roll2 = Math.sin(z * 0.025) * cfg.hillAmp * 0.05;  // 짧은 파장 (약하게)
+
+  // 노이즈는 안 씀 → 울퉁불퉁 없음
+  return slope + roll1 + roll2;
 }
 
 // 사이드 터레인 높이 (도로 바깥 - 도로 가장자리에서 부드럽게 연결)
