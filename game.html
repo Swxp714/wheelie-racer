@@ -90,6 +90,22 @@
     position:absolute; width:8px; height:8px;
     animation: fireRise 0.6s ease-out forwards;
   }
+  /* 스피드 라인 */
+  #speed-lines {
+    position:fixed; inset:0; pointer-events:none; z-index:9; overflow:hidden;
+    display:none;
+  }
+  .speed-line {
+    position:absolute;
+    background:#fff;
+    opacity:0.4;
+  }
+  /* 비네팅 */
+  #vignette {
+    position:fixed; inset:0; pointer-events:none; z-index:8;
+    background: radial-gradient(ellipse at center, transparent 50%, rgba(0,0,0,0) 100%);
+    display:none;
+  }
   .hud-controls {
     position:absolute; bottom:20px; left:24px;
     font-size:7px; color:#8888AA; line-height:2;
@@ -232,6 +248,10 @@
   </p>
   <button id="start-btn" onclick="startGame()">START</button>
 </div>
+
+<!-- 속도 이펙트 -->
+<div id="speed-lines"></div>
+<div id="vignette"></div>
 
 <!-- HUD -->
 <div id="hud">
@@ -1746,6 +1766,72 @@ function gameLoop() {
       scene.remove(p.mesh);
       cigSmoke.splice(i, 1);
     }
+  }
+
+  // === 속도 이펙트 ===
+  const speedRatio = effSpeed / maxSpeed; // 0~1
+
+  // FOV 변화 (고속일수록 넓어짐)
+  const targetFov = 75 + speedRatio * 15; // 75~90
+  camera.fov += (targetFov - camera.fov) * 3 * dt;
+  camera.updateProjectionMatrix();
+
+  // 스피드 라인 (바람 효과)
+  const slDiv = document.getElementById('speed-lines');
+  if (speedRatio > 0.4) {
+    slDiv.style.display = 'block';
+    // 속도에 비례해서 라인 생성
+    const lineCount = Math.floor((speedRatio - 0.4) * 15);
+    if (Math.random() < speedRatio * 0.8) {
+      for (let i = 0; i < lineCount; i++) {
+        const line = document.createElement('div');
+        line.className = 'speed-line';
+        const side = Math.random() > 0.5;
+        const yPos = Math.random() * 100;
+        const len = 40 + speedRatio * 120;
+        const thick = 1 + Math.random() * 2;
+        line.style.width = `${len}px`;
+        line.style.height = `${thick}px`;
+        line.style.top = `${yPos}%`;
+        line.style.opacity = 0.15 + speedRatio * 0.35;
+        if (side) {
+          line.style.right = '0';
+          line.style.transform = `translateX(100%) rotate(${-5 + Math.random()*10}deg)`;
+          line.style.transition = `transform ${0.15 + Math.random()*0.15}s linear, opacity 0.1s`;
+          setTimeout(() => { line.style.transform = `translateX(-${innerWidth*0.6}px) rotate(${-5+Math.random()*10}deg)`; line.style.opacity = '0'; }, 10);
+        } else {
+          line.style.left = '0';
+          line.style.transform = `translateX(-100%) rotate(${-5 + Math.random()*10}deg)`;
+          line.style.transition = `transform ${0.15 + Math.random()*0.15}s linear, opacity 0.1s`;
+          setTimeout(() => { line.style.transform = `translateX(${innerWidth*0.6}px) rotate(${-5+Math.random()*10}deg)`; line.style.opacity = '0'; }, 10);
+        }
+        slDiv.appendChild(line);
+        setTimeout(() => line.remove(), 400);
+      }
+    }
+  } else {
+    slDiv.style.display = 'none';
+  }
+
+  // 비네팅 (고속 시 화면 가장자리 어두워짐)
+  const vigDiv = document.getElementById('vignette');
+  if (speedRatio > 0.5) {
+    vigDiv.style.display = 'block';
+    const vigStr = (speedRatio - 0.5) * 1.2; // 0~0.6
+    vigDiv.style.background = `radial-gradient(ellipse at center, transparent ${60 - vigStr*30}%, rgba(0,0,0,${vigStr * 0.7}) 100%)`;
+  } else {
+    vigDiv.style.display = 'none';
+  }
+
+  // 뒷바퀴 먼지 파티클 (3D, 가속 시)
+  if (speed > 5 && !inAirStunt && Math.random() < speedRatio * 0.6) {
+    const dust = box(0.15 + Math.random()*0.15, 0.15, 0.15, speedRatio > 0.7 ? 0xFFAA44 : 0xAA9966);
+    dust.material.transparent = true;
+    dust.material.opacity = 0.5;
+    dust.position.set(bikeX + (Math.random()-0.5)*0.5, 0.2, bikeZ - 1);
+    scene.add(dust);
+    const dv = { x:(Math.random()-0.5)*2, y:0.5+Math.random()*1.5, z:-1-Math.random()*2, life:0.8 };
+    cigSmoke.push({ mesh:dust, life:dv.life, vel:new THREE.Vector3(dv.x,dv.y,dv.z) });
   }
 
   // === HUD ===
