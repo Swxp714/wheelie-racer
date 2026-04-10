@@ -604,7 +604,7 @@ function createAIRacers() {
     aiGroup.add(makeRiderModel(c.shirt, c.helmet));
 
     const startX = (i - 1) * 2.5;
-    aiGroup.position.set(startX, 0, -5 - i * 3);
+    aiGroup.position.set(startX, getRoadHeight(-5 - i * 3), -5 - i * 3);
     scene.add(aiGroup);
 
     aiRacers.push({
@@ -952,7 +952,7 @@ function sendState() {
     type: 'state',
     x: bikeX,
     z: bikeZ,
-    y: jumpY,
+    y: (window._smoothRoadH || 0) + jumpY,
     rotX: bike.rotation.x,
     rotZ: bike.rotation.z,
     speed: speed,
@@ -1246,9 +1246,10 @@ function gameLoop() {
       part.mesh.rotation.x += part.rotVel.x * dt;
       part.mesh.rotation.z += part.rotVel.z * dt;
 
-      // 바닥 충돌: y=0 아래로 안 가게
-      if (part.mesh.position.y <= 0.3) {
-        part.mesh.position.y = 0.3;
+      // 바닥 충돌: 도로 높이 아래로 안 가게
+      const partFloor = getRoadHeight(part.mesh.position.z) + 0.3;
+      if (part.mesh.position.y <= partFloor) {
+        part.mesh.position.y = partFloor;
         part.vel.y = Math.abs(part.vel.y) * 0.3; // 바운스 (감쇠)
         part.vel.x *= 0.9;  // 마찰
         part.vel.z *= 0.9;
@@ -1261,13 +1262,14 @@ function gameLoop() {
     if (ragdollParts.length >= 2) {
       riderPos = ragdollParts[1].mesh.position;
     }
+    const deathRoadH = getRoadHeight(riderPos.z);
     const dCamX = riderPos.x - 5;
-    const dCamY = Math.max(riderPos.y + 3, 4);
+    const dCamY = Math.max(riderPos.y + 3, deathRoadH + 4);
     const dCamZ = riderPos.z - 8;
     camera.position.x += (dCamX - camera.position.x) * 4 * dt;
     camera.position.y += (dCamY - camera.position.y) * 4 * dt;
     camera.position.z += (dCamZ - camera.position.z) * 6 * dt;
-    camera.lookAt(riderPos.x, Math.max(riderPos.y, 0), riderPos.z);
+    camera.lookAt(riderPos.x, Math.max(riderPos.y, deathRoadH), riderPos.z);
 
     if (deathTimer <= 0) respawn();
     renderer.render(scene, camera);
@@ -1576,7 +1578,8 @@ function gameLoop() {
   // 도로 높이 + 점프 높이 (부드럽게 보간해서 꺼짐 방지)
   const targetRoadH = getRoadHeight(bikeZ);
   if (typeof window._smoothRoadH === 'undefined') window._smoothRoadH = targetRoadH;
-  window._smoothRoadH += (targetRoadH - window._smoothRoadH) * Math.min(1, 15 * dt);
+  const smoothFactor = Math.min(1, (20 + speed * 0.3) * dt); // 고속일수록 빠르게 따라감
+  window._smoothRoadH += (targetRoadH - window._smoothRoadH) * smoothFactor;
   const roadHeight = window._smoothRoadH;
   bike.position.set(bikeX, roadHeight + jumpY, bikeZ);
   if (inAirStunt) {
@@ -1685,7 +1688,7 @@ function gameLoop() {
     // 가끔 윌리
     ai.wheelieAngle = Math.sin(ai.wobbleTimer * 0.3) * 15 + 10;
 
-    ai.group.position.set(ai.x, 0, ai.z);
+    ai.group.position.set(ai.x, getRoadHeight(ai.z), ai.z);
     ai.group.rotation.x = -ai.wheelieAngle * Math.PI / 180;
   }
   } // end if !isMultiplayer
@@ -1710,15 +1713,15 @@ function gameLoop() {
     camera.position.x += (cinX - camera.position.x) * 5 * dt;
     camera.position.y += (cinY - camera.position.y) * 5 * dt;
     camera.position.z += (cinZ - camera.position.z) * 8 * dt;
-    camera.lookAt(bikeX, jumpY + 1, bikeZ);
+    camera.lookAt(bikeX, roadHeight + jumpY + 1, bikeZ);
   } else if (tauntLookBack) {
     // 뻐큐: 라이더 머리 위치에서 뒤를 봄 (3인칭 헤드캠)
-    const headY = 2.8 + jumpY;
-    const headZ = bikeZ - 0.2;  // 라이더 머리 약간 뒤
+    const headY = roadHeight + 2.8 + jumpY;
+    const headZ = bikeZ - 0.2;
     camera.position.z = headZ;
     camera.position.x += (bikeX - camera.position.x) * 12 * dt;
     camera.position.y += (headY - camera.position.y) * 12 * dt;
-    camera.lookAt(bikeX, 2, bikeZ - 40);  // 뒤를 봄
+    camera.lookAt(bikeX, roadHeight + 2, bikeZ - 40);  // 뒤를 봄
   } else {
     // 1인칭 (바이크에 고정)
     // 윌리 각도에 비례해서 카메라가 위를 봄 (자연스러운 라이더 시점)
@@ -1985,7 +1988,7 @@ function gameLoop() {
       const dust = box(sz, sz, sz, dustColors[Math.floor(Math.random()*dustColors.length)]);
       dust.material.transparent = true;
       dust.material.opacity = 0.6;
-      dust.position.set(bikeX + (Math.random()-0.5)*0.6, 0.15 + Math.random()*0.2, bikeZ - 0.8 - Math.random()*0.5);
+      dust.position.set(bikeX + (Math.random()-0.5)*0.6, roadHeight + 0.15 + Math.random()*0.2, bikeZ - 0.8 - Math.random()*0.5);
       scene.add(dust);
       cigSmoke.push({
         mesh: dust,
@@ -2100,7 +2103,7 @@ function die(cause) {
 
     // 바이크 → 앞으로 슬라이딩
     const bikeCopy = makeBikeModel(0xF95858);
-    bikeCopy.position.set(bikeX, jumpY + 0.5, bikeZ);
+    bikeCopy.position.set(bikeX, getRoadHeight(bikeZ) + jumpY + 0.5, bikeZ);
     scene.add(bikeCopy);
     ragdollParts.push({
       mesh: bikeCopy,
@@ -2110,7 +2113,7 @@ function die(cause) {
 
     // 라이더 → 뒤로 넘어짐 (뒤쪽 + 위로)
     const riderCopy = makeRiderModel(0x1E88E5, 0xE53935);
-    riderCopy.position.set(bikeX, jumpY + 2.5, bikeZ - 0.5);
+    riderCopy.position.set(bikeX, getRoadHeight(bikeZ) + jumpY + 2.5, bikeZ - 0.5);
     riderCopy.rotation.x = -2.5; // 뒤로 젖혀진 자세
     scene.add(riderCopy);
     ragdollParts.push({
@@ -2129,7 +2132,7 @@ function die(cause) {
 
     // 바이크 → 제자리서 튕김
     const bikeCopy = makeBikeModel(0xF95858);
-    bikeCopy.position.set(bikeX, jumpY + 0.5, bikeZ);
+    bikeCopy.position.set(bikeX, getRoadHeight(bikeZ) + jumpY + 0.5, bikeZ);
     scene.add(bikeCopy);
     ragdollParts.push({
       mesh: bikeCopy,
@@ -2139,7 +2142,7 @@ function die(cause) {
 
     // 라이더 → 앞으로 개멀리 날아감 (속도 비례)
     const riderCopy = makeRiderModel(0x1E88E5, 0xE53935);
-    riderCopy.position.set(bikeX, jumpY + 2, bikeZ + 1);
+    riderCopy.position.set(bikeX, getRoadHeight(bikeZ) + jumpY + 2, bikeZ + 1);
     scene.add(riderCopy);
     ragdollParts.push({
       mesh: riderCopy,
@@ -2167,7 +2170,8 @@ function respawn() {
   isJumping = false;
   bike.rotation.x = 0;
   bike.rotation.z = 0;
-  bike.position.set(0, 0, bikeZ);
+  window._smoothRoadH = getRoadHeight(bikeZ);
+  bike.position.set(0, window._smoothRoadH, bikeZ);
   bike.visible = true;
   invincibleTimer = 1;
   hudDeath.style.display = 'none';
@@ -2177,8 +2181,9 @@ function respawn() {
   ragdollParts = [];
 
   // 카메라 1인칭으로 복귀 + 핸들바 표시
-  camera.position.set(0, 2.2, bikeZ + 0.3);
-  camera.lookAt(0, 1.5, bikeZ + 30);
+  const rspH = getRoadHeight(bikeZ);
+  camera.position.set(0, rspH + 2.2, bikeZ + 0.3);
+  camera.lookAt(0, rspH + 1.5, bikeZ + 30);
   if (fpvGroup) fpvGroup.visible = true;
 }
 
@@ -2235,7 +2240,8 @@ function restartRace() {
   backflipAngle = 0; backflipActive = false;
   isDead = false; raceFinished = false; raceTime = 0;
   airTime = 0;
-  bike.position.set(0, 0, 0);
+  window._smoothRoadH = getRoadHeight(0);
+  bike.position.set(0, window._smoothRoadH, 0);
   bike.rotation.set(0, 0, 0);
   bike.visible = true;
   if (fpvGroup) fpvGroup.visible = true;
@@ -2248,7 +2254,7 @@ function restartRace() {
     ai.z = -5 - i * 3; ai.x = (i-1) * 2.5;
     ai.speed = 14 + Math.random() * 8;
     ai.finished = false; ai.finishTime = 0;
-    ai.group.position.set(ai.x, 0, ai.z);
+    ai.group.position.set(ai.x, getRoadHeight(ai.z), ai.z);
   }
   hudDeath.style.display = 'none';
 }
