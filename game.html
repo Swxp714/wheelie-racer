@@ -652,13 +652,17 @@ function getRoadHeight(z) {
   return slope + hill;
 }
 
-// 사이드 터레인 높이 (도로 바깥)
+// 사이드 터레인 높이 (도로 바깥 - 도로 가장자리에서 부드럽게 연결)
 function getSideHeight(x, z) {
   const cfg = MAP_CONFIG[selectedMap] || MAP_CONFIG[0];
   const roadH = getRoadHeight(z);
   const distFromRoad = Math.max(0, Math.abs(x) - 6);
+  // 0~5m: 도로→산 부드러운 블렌드
+  const blend = Math.min(1, distFromRoad / 5);
   const sideNoise = fbm(x, z, 4, cfg.sideFreq, cfg.sideAmp);
-  return roadH + distFromRoad * 0.3 + Math.max(0, sideNoise);
+  const fullHeight = roadH + distFromRoad * 0.3 + Math.max(0, sideNoise);
+  // 도로 가장자리에선 도로 높이 그대로, 멀어질수록 산 높이
+  return roadH + (fullHeight - roadH) * blend * blend; // ease-in
 }
 
 function createSegment(z) {
