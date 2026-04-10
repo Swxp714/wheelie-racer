@@ -99,6 +99,12 @@
     position:absolute;
     background:#fff;
     opacity:0.4;
+    image-rendering:pixelated;
+  }
+  .speed-dot {
+    position:absolute;
+    width:4px; height:4px;
+    image-rendering:pixelated;
   }
   /* 비네팅 */
   #vignette {
@@ -279,6 +285,30 @@
 
 <!-- Three.js -->
 <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/simplex-noise@4.0.1/dist/esm/simplex-noise.min.js" type="module" id="noise-module"></script>
+<script>
+// 간단한 Perlin noise (CDN 로드 실패 대비 폴백)
+window.noise2D = (function(){
+  const p = [];
+  for(let i=0;i<512;i++) p[i]=Math.floor(Math.random()*256);
+  function fade(t){return t*t*t*(t*(t*6-15)+10)}
+  function lerp(a,b,t){return a+t*(b-a)}
+  function grad(h,x,y){const v=h&3;return(v===0?x+y:v===1?-x+y:v===2?x-y:-x-y)}
+  return function(x,y){
+    const X=Math.floor(x)&255,Y=Math.floor(y)&255;
+    x-=Math.floor(x);y-=Math.floor(y);
+    const u=fade(x),v=fade(y);
+    const a=p[X]+Y,b=p[X+1]+Y;
+    return lerp(lerp(grad(p[a],x,y),grad(p[b],x-1,y),u),lerp(grad(p[a+1],x,y-1),grad(p[b+1],x-1,y-1),u),v);
+  };
+})();
+// FBM (여러 옥타브 노이즈)
+window.fbm = function(x,y,octaves,freq,amp){
+  let v=0,f=freq||0.02,a=amp||1;
+  for(let i=0;i<(octaves||4);i++){v+=noise2D(x*f,y*f)*a;f*=2;a*=0.5;}
+  return v;
+};
+</script>
 <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
 
 <!-- MediaPipe Hands -->
@@ -365,6 +395,38 @@ let remoteState = { x:0, z:0, y:0, rotX:0, rotZ:0, speed:0, score:0, dead:false 
 let selectedMap = 0;
 let selectedMode = 'downhill';
 const MAP_NAMES = ['GREEN VALLEY','PINE RIDGE','ROCKY PASS','SNOW PEAK','DEATH MOUNTAIN'];
+const MAP_CONFIG = [
+  { // GREEN VALLEY - 완만
+    hillAmp: 3, hillFreq: 0.008, sideAmp: 8, sideFreq: 0.015,
+    roadColor: 0x666677, grassColor: 0x4CAF50, sideColor: 0x388E3C,
+    fogColor: 0x85D2FE, fogNear: 80, fogFar: 250,
+    treeType: 'oak', skyColor: 0x85D2FE, snowLine: 999,
+  },
+  { // PINE RIDGE - 소나무 숲
+    hillAmp: 6, hillFreq: 0.012, sideAmp: 15, sideFreq: 0.02,
+    roadColor: 0x555566, grassColor: 0x2E7D32, sideColor: 0x1B5E20,
+    fogColor: 0x6BA8A0, fogNear: 60, fogFar: 200,
+    treeType: 'pine', skyColor: 0x6BA8A0, snowLine: 999,
+  },
+  { // ROCKY PASS - 바위 협곡
+    hillAmp: 12, hillFreq: 0.015, sideAmp: 25, sideFreq: 0.025,
+    roadColor: 0x555555, grassColor: 0x8B7D3C, sideColor: 0x6B5B2C,
+    fogColor: 0xC4A882, fogNear: 50, fogFar: 180,
+    treeType: 'rock', skyColor: 0xC4A882, snowLine: 20,
+  },
+  { // SNOW PEAK - 설산
+    hillAmp: 18, hillFreq: 0.01, sideAmp: 35, sideFreq: 0.018,
+    roadColor: 0x888899, grassColor: 0xCCDDCC, sideColor: 0xAABBAA,
+    fogColor: 0xDDE8F0, fogNear: 40, fogFar: 160,
+    treeType: 'pine_snow', skyColor: 0xDDE8F0, snowLine: 8,
+  },
+  { // DEATH MOUNTAIN - 화산
+    hillAmp: 22, hillFreq: 0.018, sideAmp: 40, sideFreq: 0.03,
+    roadColor: 0x443333, grassColor: 0x3A2A1A, sideColor: 0x2A1A0A,
+    fogColor: 0x442222, fogNear: 30, fogFar: 140,
+    treeType: 'lava_rock', skyColor: 0x442222, snowLine: 999,
+  },
+];
 
 // 트랙
 const SEG_LEN = 30;
@@ -554,59 +616,151 @@ function createAIRacers() {
 
 
 // ============================================================
-//  TRACK (절차적 트랙)
+//  TRACK (산악 절차적 트랙)
 // ============================================================
+
+// 도로 높이 가져오기 (노이즈 기반)
+function getRoadHeight(z) {
+  const cfg = MAP_CONFIG[selectedMap] || MAP_CONFIG[0];
+  const dir = selectedMode === 'uphill' ? 1 : -1;
+  // 기본 경사 (업힐/다운힐)
+  const slope = z * 0.015 * dir * (cfg.hillAmp / 10);
+  // 노이즈 언덕
+  const hill = fbm(0, z, 3, cfg.hillFreq, cfg.hillAmp);
+  return slope + hill;
+}
+
+// 사이드 터레인 높이 (도로 바깥)
+function getSideHeight(x, z) {
+  const cfg = MAP_CONFIG[selectedMap] || MAP_CONFIG[0];
+  const roadH = getRoadHeight(z);
+  const distFromRoad = Math.max(0, Math.abs(x) - 6);
+  const sideNoise = fbm(x, z, 4, cfg.sideFreq, cfg.sideAmp);
+  return roadH + distFromRoad * 0.3 + Math.max(0, sideNoise);
+}
+
 function createSegment(z) {
   const seg = new THREE.Group();
   seg.userData.zStart = z;
+  const cfg = MAP_CONFIG[selectedMap] || MAP_CONFIG[0];
+
+  // 도로 높이 (세그먼트 중심)
+  const roadY = getRoadHeight(z);
+  const roadYFront = getRoadHeight(z + SEG_LEN/2);
+  const roadYBack = getRoadHeight(z - SEG_LEN/2);
+  const roadTilt = Math.atan2(roadYFront - roadYBack, SEG_LEN);
 
   // 도로
-  const road = box(12, 0.2, SEG_LEN, 0x666677);
-  road.position.set(0, -0.1, z);
+  const road = box(12, 0.2, SEG_LEN, cfg.roadColor);
+  road.position.set(0, roadY, z);
+  road.rotation.x = -roadTilt;
   road.receiveShadow = true;
   seg.add(road);
 
   // 중앙선 (점선)
   for (let i = -SEG_LEN/2 + 1; i < SEG_LEN/2; i += 3) {
+    const localZ = z + i;
+    const localY = getRoadHeight(localZ);
     const dash = box(0.2, 0.01, 1.5, 0xFFD600);
-    dash.position.set(0, 0.01, z + i);
+    dash.position.set(0, localY + 0.12, localZ);
     seg.add(dash);
   }
 
   // 가장자리
-  const edgeL = box(0.25, 0.15, SEG_LEN, 0xFFFFFF);
-  edgeL.position.set(-6, 0.05, z);
-  seg.add(edgeL);
-  const edgeR = box(0.25, 0.15, SEG_LEN, 0xFFFFFF);
-  edgeR.position.set(6, 0.05, z);
-  seg.add(edgeR);
+  for (const side of [-6, 6]) {
+    const edge = box(0.25, 0.2, SEG_LEN, 0xFFFFFF);
+    edge.position.set(side, roadY + 0.05, z);
+    edge.rotation.x = -roadTilt;
+    seg.add(edge);
+  }
 
-  // 잔디
-  const grassL = box(30, 0.15, SEG_LEN, 0x4CAF50);
-  grassL.position.set(-21, -0.05, z);
-  grassL.receiveShadow = true;
-  seg.add(grassL);
-  const grassR = box(30, 0.15, SEG_LEN, 0x4CAF50);
-  grassR.position.set(21, -0.05, z);
-  grassR.receiveShadow = true;
-  seg.add(grassR);
+  // 사이드 터레인 (좌우 산/언덕)
+  for (const sideX of [-1, 1]) {
+    const terrW = 30, terrD = SEG_LEN;
+    const terrSegs = 8;
+    const geom = new THREE.PlaneGeometry(terrW, terrD, terrSegs, terrSegs);
+    geom.rotateX(-Math.PI / 2);
+    const pos = geom.attributes.position;
+    const colors = [];
 
-  // 나무
-  const treeCount = Math.floor(Math.random() * 3) + 1;
-  for (let i = 0; i < treeCount; i++) {
+    for (let vi = 0; vi < pos.count; vi++) {
+      const vx = pos.getX(vi) + sideX * 21;
+      const vz = pos.getZ(vi) + z;
+      const h = getSideHeight(vx, vz);
+      pos.setY(vi, h);
+
+      // 높이 기반 컬러링
+      const relH = h - roadY;
+      let r, g, b;
+      if (relH < cfg.snowLine * 0.3) {
+        // 풀
+        const c = new THREE.Color(cfg.grassColor);
+        r = c.r; g = c.g; b = c.b;
+      } else if (relH < cfg.snowLine * 0.6) {
+        // 바위/흙
+        const c = new THREE.Color(cfg.sideColor);
+        r = c.r; g = c.g; b = c.b;
+      } else {
+        // 눈
+        r = 0.93; g = 0.95; b = 0.97;
+      }
+      colors.push(r, g, b);
+    }
+
+    geom.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+    geom.computeVertexNormals();
+    const mat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
+    const terrain = new THREE.Mesh(geom, mat);
+    terrain.position.set(sideX * 21, 0, z);
+    terrain.receiveShadow = true;
+    seg.add(terrain);
+  }
+
+  // 나무/바위 (맵 타입별)
+  const objCount = Math.floor(Math.random() * 4) + 1;
+  for (let i = 0; i < objCount; i++) {
     const side = Math.random() > 0.5 ? 1 : -1;
-    const tx = side * (8 + Math.random() * 8);
+    const tx = side * (8 + Math.random() * 10);
     const tz = z + (Math.random() - 0.5) * SEG_LEN * 0.8;
+    const th = getSideHeight(tx, tz);
 
-    const trunk = box(0.5, 2, 0.5, 0x8B5A2B);
-    trunk.position.set(tx, 1, tz);
-    trunk.castShadow = true;
-    seg.add(trunk);
-
-    const leaves = box(1.5, 1.5, 1.5, 0x388E3C);
-    leaves.position.set(tx, 2.5, tz);
-    leaves.castShadow = true;
-    seg.add(leaves);
+    if (cfg.treeType === 'oak') {
+      // 참나무
+      const trunk = box(0.5, 2, 0.5, 0x8B5A2B);
+      trunk.position.set(tx, th + 1, tz); seg.add(trunk);
+      const leaves = box(1.5, 1.5, 1.5, 0x388E3C);
+      leaves.position.set(tx, th + 2.5, tz); seg.add(leaves);
+    } else if (cfg.treeType === 'pine' || cfg.treeType === 'pine_snow') {
+      // 소나무
+      const trunk = box(0.3, 3, 0.3, 0x5D4037);
+      trunk.position.set(tx, th + 1.5, tz); seg.add(trunk);
+      for (let layer = 0; layer < 3; layer++) {
+        const sz = 1.8 - layer * 0.5;
+        const pineColor = cfg.treeType === 'pine_snow' ? 0x4A6A4A : 0x1B5E20;
+        const leaf = box(sz, 0.8, sz, pineColor);
+        leaf.position.set(tx, th + 2 + layer * 0.7, tz); seg.add(leaf);
+      }
+      if (cfg.treeType === 'pine_snow') {
+        const snow = box(1.2, 0.15, 1.2, 0xEEEEEE);
+        snow.position.set(tx, th + 4.2, tz); seg.add(snow);
+      }
+    } else if (cfg.treeType === 'rock') {
+      // 바위
+      const sz = 0.8 + Math.random() * 1.5;
+      const rock = box(sz, sz * 0.7, sz * 0.9, 0x777766);
+      rock.position.set(tx, th + sz * 0.35, tz);
+      rock.rotation.y = Math.random() * Math.PI; seg.add(rock);
+    } else if (cfg.treeType === 'lava_rock') {
+      // 용암 바위
+      const sz = 1 + Math.random() * 2;
+      const rock = box(sz, sz * 0.8, sz * 0.9, 0x332211);
+      rock.position.set(tx, th + sz * 0.4, tz); seg.add(rock);
+      // 가끔 용암 빛
+      if (Math.random() < 0.3) {
+        const glow = box(sz * 0.4, 0.2, sz * 0.4, 0xFF4400);
+        glow.position.set(tx, th + 0.1, tz); seg.add(glow);
+      }
+    }
   }
 
   segCount++;
@@ -622,11 +776,11 @@ function createSegment(z) {
       let obs;
       if (type < 0.5) {
         obs = box(0.5, 1, 0.5, 0xFB8C00);
-        obs.position.set(ox, 0.5, oz);
+        obs.position.set(ox, getRoadHeight(oz) + 0.5, oz);
       } else {
         const carColor = [0xE53935,0x1E88E5,0xFFD600,0x43A047,0xFFFFFF,0x333333][Math.floor(Math.random()*6)];
         obs = box(1.4, 1, 2.4, carColor);
-        obs.position.set(ox, 0.5, oz);
+        obs.position.set(ox, getRoadHeight(oz) + 0.5, oz);
         const roof = box(1.2, 0.5, 1.2, carColor); roof.position.y = 0.7; obs.add(roof);
         for (const wx of [-0.6,0.6]) for (const wz of [-0.8,0.8]) {
           const w = box(0.2,0.4,0.4, 0x222222); w.position.set(wx,-0.3,wz); obs.add(w);
@@ -675,7 +829,7 @@ function createSegment(z) {
       rampSize = 'L';
     }
 
-    ramp.position.set(rx, ramp.geometry.parameters.height / 2, rz);
+    ramp.position.set(rx, getRoadHeight(rz) + ramp.geometry.parameters.height / 2, rz);
     ramp.castShadow = true;
     ramp.userData.isRamp = true;
     ramp.userData.hw = ramp.geometry.parameters.width / 2 + 0.3;
@@ -690,7 +844,8 @@ function createSegment(z) {
     const coinCount = Math.floor(Math.random() * 3) + 3;
     for (let i = 0; i < coinCount; i++) {
       const coin = box(0.4, 0.4, 0.4, 0xFFD600);
-      coin.position.set(cx, 1.2, z + i * 2.5 - coinCount);
+      const coinZ = z + i * 2.5 - coinCount;
+      coin.position.set(cx, getRoadHeight(coinZ) + 1.2, coinZ);
       coin.rotation.y = 0.785;
       coin.castShadow = true;
       coin.userData.isCoin = true;
@@ -1388,7 +1543,9 @@ function gameLoop() {
   }
 
   // 바이크 위치/회전
-  bike.position.set(bikeX, jumpY, bikeZ);
+  // 도로 높이 + 점프 높이
+  const roadHeight = getRoadHeight(bikeZ);
+  bike.position.set(bikeX, roadHeight + jumpY, bikeZ);
   if (inAirStunt) {
     // 공중: 스턴트 회전 (양수=백플립, 음수=리버스)
     bike.rotation.x = -backflipAngle * Math.PI / 180;
@@ -1515,7 +1672,7 @@ function gameLoop() {
     const cinSwing = Math.sin(performance.now() * 0.0005) * 0.7; // -0.7 ~ 0.7 라디안 (약 ±40도)
     const cinDist = 8;
     const cinX = bikeX + Math.sin(cinSwing) * cinDist;
-    const cinY = jumpY + 4;
+    const cinY = roadHeight + jumpY + 4;
     const cinZ = bikeZ - Math.abs(Math.cos(cinSwing)) * cinDist; // 항상 뒤쪽 (- 방향)
     camera.position.x += (cinX - camera.position.x) * 5 * dt;
     camera.position.y += (cinY - camera.position.y) * 5 * dt;
@@ -1533,7 +1690,7 @@ function gameLoop() {
     // 1인칭 (바이크에 고정)
     // 윌리 각도에 비례해서 카메라가 위를 봄 (자연스러운 라이더 시점)
     const wheelieRad = wheelieAngle * Math.PI / 180;
-    const fpY = 2.2 + jumpY + Math.sin(wheelieRad) * 2.0;
+    const fpY = 2.2 + roadHeight + jumpY + Math.sin(wheelieRad) * 2.0;
     camera.position.z = bikeZ + 0.3;
     camera.position.x += (bikeX - camera.position.x) * 12 * dt;
     camera.position.y += (fpY - camera.position.y) * 12 * dt;
@@ -1781,57 +1938,65 @@ function gameLoop() {
   if (speedRatio > 0.4) {
     slDiv.style.display = 'block';
     // 속도에 비례해서 라인 생성
-    const lineCount = Math.floor((speedRatio - 0.4) * 15);
-    if (Math.random() < speedRatio * 0.8) {
-      for (let i = 0; i < lineCount; i++) {
-        const line = document.createElement('div');
-        line.className = 'speed-line';
+    const dotCount = Math.floor((speedRatio - 0.4) * 20);
+    if (Math.random() < speedRatio * 0.9) {
+      for (let i = 0; i < dotCount; i++) {
+        // 도트 체인 (3~6개 도트가 줄지어 날아감)
+        const chainLen = 3 + Math.floor(Math.random() * 4);
         const side = Math.random() > 0.5;
         const yPos = Math.random() * 100;
-        const len = 40 + speedRatio * 120;
-        const thick = 1 + Math.random() * 2;
-        line.style.width = `${len}px`;
-        line.style.height = `${thick}px`;
-        line.style.top = `${yPos}%`;
-        line.style.opacity = 0.15 + speedRatio * 0.35;
-        if (side) {
-          line.style.right = '0';
-          line.style.transform = `translateX(100%) rotate(${-5 + Math.random()*10}deg)`;
-          line.style.transition = `transform ${0.15 + Math.random()*0.15}s linear, opacity 0.1s`;
-          setTimeout(() => { line.style.transform = `translateX(-${innerWidth*0.6}px) rotate(${-5+Math.random()*10}deg)`; line.style.opacity = '0'; }, 10);
-        } else {
-          line.style.left = '0';
-          line.style.transform = `translateX(-100%) rotate(${-5 + Math.random()*10}deg)`;
-          line.style.transition = `transform ${0.15 + Math.random()*0.15}s linear, opacity 0.1s`;
-          setTimeout(() => { line.style.transform = `translateX(${innerWidth*0.6}px) rotate(${-5+Math.random()*10}deg)`; line.style.opacity = '0'; }, 10);
+        const angle = -5 + Math.random() * 10;
+        const colors = ['#fff','#ddd','#bbb','#FFD600','#85D2FE'];
+        const dotColor = colors[Math.floor(Math.random() * colors.length)];
+        const dotSize = 3 + Math.floor(Math.random() * 4); // 3~6px 픽셀
+
+        for (let j = 0; j < chainLen; j++) {
+          const dot = document.createElement('div');
+          dot.className = 'speed-dot';
+          dot.style.width = dot.style.height = `${dotSize}px`;
+          dot.style.backgroundColor = dotColor;
+          dot.style.top = `${yPos + j * 0.3}%`;
+          dot.style.opacity = (0.2 + speedRatio * 0.5) * (1 - j/chainLen);
+          const delay = j * 20;
+          const travelTime = 0.12 + Math.random() * 0.15;
+
+          if (side) {
+            dot.style.right = `${-10 - j * (dotSize + 2)}px`;
+            dot.style.transition = `transform ${travelTime}s linear, opacity ${travelTime * 0.8}s`;
+            setTimeout(() => { dot.style.transform = `translateX(-${innerWidth * 0.7}px) rotate(${angle}deg)`; dot.style.opacity = '0'; }, 10 + delay);
+          } else {
+            dot.style.left = `${-10 - j * (dotSize + 2)}px`;
+            dot.style.transition = `transform ${travelTime}s linear, opacity ${travelTime * 0.8}s`;
+            setTimeout(() => { dot.style.transform = `translateX(${innerWidth * 0.7}px) rotate(${angle}deg)`; dot.style.opacity = '0'; }, 10 + delay);
+          }
+          slDiv.appendChild(dot);
+          setTimeout(() => dot.remove(), 500);
         }
-        slDiv.appendChild(line);
-        setTimeout(() => line.remove(), 400);
       }
     }
   } else {
     slDiv.style.display = 'none';
   }
 
-  // 비네팅 (고속 시 화면 가장자리 어두워짐)
-  const vigDiv = document.getElementById('vignette');
-  if (speedRatio > 0.5) {
-    vigDiv.style.display = 'block';
-    const vigStr = (speedRatio - 0.5) * 1.2; // 0~0.6
-    vigDiv.style.background = `radial-gradient(ellipse at center, transparent ${60 - vigStr*30}%, rgba(0,0,0,${vigStr * 0.7}) 100%)`;
-  } else {
-    vigDiv.style.display = 'none';
-  }
+  // (비네팅 제거됨)
 
-  // 뒷바퀴 먼지 파티클 (3D, 가속 시)
-  if (speed > 5 && !inAirStunt && Math.random() < speedRatio * 0.6) {
-    const dust = box(0.15 + Math.random()*0.15, 0.15, 0.15, speedRatio > 0.7 ? 0xFFAA44 : 0xAA9966);
-    dust.material.transparent = true;
-    dust.material.opacity = 0.5;
-    dust.position.set(bikeX + (Math.random()-0.5)*0.5, 0.2, bikeZ - 1);
-    scene.add(dust);
-    const dv = { x:(Math.random()-0.5)*2, y:0.5+Math.random()*1.5, z:-1-Math.random()*2, life:0.8 };
-    cigSmoke.push({ mesh:dust, life:dv.life, vel:new THREE.Vector3(dv.x,dv.y,dv.z) });
+  // 뒷바퀴 먼지 도트 (3D 복셀 파티클)
+  if (speed > 5 && !inAirStunt && Math.random() < speedRatio * 0.8) {
+    const dustCount = 1 + Math.floor(speedRatio * 3);
+    for (let di = 0; di < dustCount; di++) {
+      const sz = 0.1 + Math.random() * 0.15;
+      const dustColors = [0xAA9966, 0xBBAA77, 0x998855, 0xCCBB88, 0xFFAA44];
+      const dust = box(sz, sz, sz, dustColors[Math.floor(Math.random()*dustColors.length)]);
+      dust.material.transparent = true;
+      dust.material.opacity = 0.6;
+      dust.position.set(bikeX + (Math.random()-0.5)*0.6, 0.15 + Math.random()*0.2, bikeZ - 0.8 - Math.random()*0.5);
+      scene.add(dust);
+      cigSmoke.push({
+        mesh: dust,
+        life: 0.5 + Math.random() * 0.5,
+        vel: new THREE.Vector3((Math.random()-0.5)*2.5, 0.8+Math.random()*2, -1.5-Math.random()*speedRatio*3)
+      });
+    }
   }
 
   // === HUD ===
@@ -1984,6 +2149,12 @@ function respawn() {
 // ============================================================
 function startGame() {
   document.getElementById('start-screen').style.display = 'none';
+
+  // 맵 설정 적용
+  const cfg = MAP_CONFIG[selectedMap] || MAP_CONFIG[0];
+  scene.background = new THREE.Color(cfg.skyColor);
+  scene.fog = new THREE.Fog(cfg.fogColor, cfg.fogNear, cfg.fogFar);
+
   gameStarted = true;
   clock.start();
 }
