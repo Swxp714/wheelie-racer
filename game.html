@@ -662,15 +662,24 @@ function createSegment(z) {
   // 도로 높이 (세그먼트 중심)
   const roadY = getRoadHeight(z);
   // 도로 (곡면 메시 - 터레인 높이를 따라감)
-  const roadSegsZ = 30; // Z방향 분할 수 (1m 단위로 촘촘하게)
-  const roadGeom = new THREE.PlaneGeometry(12, SEG_LEN, 2, roadSegsZ);
+  // 0.25m 간격으로 촘촘하게 분할 (계단 제거)
+  const roadLen = SEG_LEN;
+  const roadSegsZ = 120;
+  const roadGeom = new THREE.PlaneGeometry(12, roadLen, 2, roadSegsZ);
   roadGeom.rotateX(-Math.PI / 2);
   const roadPos = roadGeom.attributes.position;
+  const roadNormal = roadGeom.attributes.normal;
   for (let vi = 0; vi < roadPos.count; vi++) {
     const vz = roadPos.getZ(vi) + z;
     roadPos.setY(vi, getRoadHeight(vz));
+    // 해석적 법선 (세그먼트 경계에서도 동일 = 이음새 제거)
+    const dz = 0.5;
+    const dy = (getRoadHeight(vz + dz) - getRoadHeight(vz - dz)) / (2 * dz);
+    const nLen = Math.sqrt(1 + dy * dy);
+    roadNormal.setXYZ(vi, 0, 1 / nLen, -dy / nLen);
   }
-  roadGeom.computeVertexNormals();
+  roadPos.needsUpdate = true;
+  roadNormal.needsUpdate = true;
   const roadMat = new THREE.MeshLambertMaterial({ color: cfg.roadColor });
   const road = new THREE.Mesh(roadGeom, roadMat);
   road.position.set(0, 0, z);
@@ -690,14 +699,20 @@ function createSegment(z) {
 
   // 가장자리 (곡면)
   for (const side of [-6, 6]) {
-    const edgeGeom = new THREE.PlaneGeometry(0.3, SEG_LEN, 1, roadSegsZ);
+    const edgeGeom = new THREE.PlaneGeometry(0.3, roadLen, 1, roadSegsZ);
     edgeGeom.rotateX(-Math.PI / 2);
     const ePos = edgeGeom.attributes.position;
+    const eNormal = edgeGeom.attributes.normal;
     for (let vi = 0; vi < ePos.count; vi++) {
       const vz = ePos.getZ(vi) + z;
       ePos.setY(vi, getRoadHeight(vz) + 0.08);
+      const dz = 0.5;
+      const dy = (getRoadHeight(vz + dz) - getRoadHeight(vz - dz)) / (2 * dz);
+      const nLen = Math.sqrt(1 + dy * dy);
+      eNormal.setXYZ(vi, 0, 1 / nLen, -dy / nLen);
     }
-    edgeGeom.computeVertexNormals();
+    ePos.needsUpdate = true;
+    eNormal.needsUpdate = true;
     const edgeMat = new THREE.MeshLambertMaterial({ color: 0xFFFFFF });
     const edge = new THREE.Mesh(edgeGeom, edgeMat);
     edge.position.set(side, 0, z);
@@ -707,7 +722,7 @@ function createSegment(z) {
   // 사이드 터레인 (좌우 산/언덕)
   for (const sideX of [-1, 1]) {
     const terrW = 30, terrD = SEG_LEN;
-    const terrSegs = 20; // 높은 해상도
+    const terrSegs = 24;
     const geom = new THREE.PlaneGeometry(terrW, terrD, terrSegs, terrSegs);
     geom.rotateX(-Math.PI / 2);
     const pos = geom.attributes.position;
