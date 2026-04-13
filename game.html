@@ -662,7 +662,7 @@ function createSegment(z) {
   // 도로 높이 (세그먼트 중심)
   const roadY = getRoadHeight(z);
   // 도로 (곡면 메시 - 터레인 높이를 따라감)
-  const roadSegsZ = 12; // Z방향 분할 수
+  const roadSegsZ = 30; // Z방향 분할 수 (1m 단위로 촘촘하게)
   const roadGeom = new THREE.PlaneGeometry(12, SEG_LEN, 2, roadSegsZ);
   roadGeom.rotateX(-Math.PI / 2);
   const roadPos = roadGeom.attributes.position;
@@ -671,7 +671,7 @@ function createSegment(z) {
     roadPos.setY(vi, getRoadHeight(vz));
   }
   roadGeom.computeVertexNormals();
-  const roadMat = new THREE.MeshLambertMaterial({ color: cfg.roadColor, flatShading: true });
+  const roadMat = new THREE.MeshLambertMaterial({ color: cfg.roadColor });
   const road = new THREE.Mesh(roadGeom, roadMat);
   road.position.set(0, 0, z);
   road.receiveShadow = true;
@@ -698,7 +698,7 @@ function createSegment(z) {
       ePos.setY(vi, getRoadHeight(vz) + 0.08);
     }
     edgeGeom.computeVertexNormals();
-    const edgeMat = new THREE.MeshLambertMaterial({ color: 0xFFFFFF, flatShading: true });
+    const edgeMat = new THREE.MeshLambertMaterial({ color: 0xFFFFFF });
     const edge = new THREE.Mesh(edgeGeom, edgeMat);
     edge.position.set(side, 0, z);
     seg.add(edge);
@@ -707,7 +707,7 @@ function createSegment(z) {
   // 사이드 터레인 (좌우 산/언덕)
   for (const sideX of [-1, 1]) {
     const terrW = 30, terrD = SEG_LEN;
-    const terrSegs = 12; // 해상도 높임
+    const terrSegs = 20; // 높은 해상도
     const geom = new THREE.PlaneGeometry(terrW, terrD, terrSegs, terrSegs);
     geom.rotateX(-Math.PI / 2);
     const pos = geom.attributes.position;
@@ -739,7 +739,7 @@ function createSegment(z) {
 
     geom.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
     geom.computeVertexNormals();
-    const mat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
+    const mat = new THREE.MeshLambertMaterial({ vertexColors: true });
     const terrain = new THREE.Mesh(geom, mat);
     terrain.position.set(sideX * 21, 0, z);
     terrain.receiveShadow = true;
