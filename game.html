@@ -629,16 +629,30 @@ function getRoadHeight(z) {
   const cfg = MAP_CONFIG[selectedMap] || MAP_CONFIG[0];
   const dir = selectedMode === 'uphill' ? 1 : -1;
 
-  // 1. 기본 경사 (업힐/다운힐 - 일관된 방향)
-  const slopeGrade = 0.012 * (cfg.hillAmp / 10); // 맵 난이도에 비례
+  // 1. 기본 경사 (업힐/다운힐)
+  const slopeGrade = 0.012 * (cfg.hillAmp / 10);
   const slope = z * slopeGrade * dir;
 
-  // 2. 부드러운 롤링힐 (사인파 2개 겹침 - 완만한 오르막/내리막)
-  const roll1 = Math.sin(z * 0.008) * cfg.hillAmp * 0.15;  // 긴 파장
-  const roll2 = Math.sin(z * 0.025) * cfg.hillAmp * 0.05;  // 짧은 파장 (약하게)
+  // 2. 부드러운 롤링힐
+  const roll1 = Math.sin(z * 0.008) * cfg.hillAmp * 0.15;
+  const roll2 = Math.sin(z * 0.025) * cfg.hillAmp * 0.05;
 
-  // 노이즈는 안 씀 → 울퉁불퉁 없음
-  return slope + roll1 + roll2;
+  // 3. 울퉁불퉁 구간 (200m마다 50m 구간)
+  const bumpCycle = ((z % 200) + 200) % 200;
+  let bumps = 0;
+  if (bumpCycle > 150) {
+    const bumpT = (bumpCycle - 150) / 50;
+    const envelope = Math.sin(bumpT * Math.PI); // 부드럽게 페이드인/아웃
+    bumps = Math.sin(z * 0.8) * envelope * 0.3 + Math.sin(z * 1.5) * envelope * 0.15;
+  }
+
+  return slope + roll1 + roll2 + bumps;
+}
+
+// 도로 중심 X 오프셋 (좌우 휘어짐)
+function getRoadCenterX(z) {
+  // 긴 곡선 + 중간 곡선 조합
+  return Math.sin(z * 0.006) * 20 + Math.sin(z * 0.02) * 5;
 }
 
 // 사이드 터레인 높이 (도로 바깥 - 도로 가장자리에서 부드럽게 연결)
@@ -671,8 +685,11 @@ function createSegment(z) {
   const roadNormal = roadGeom.attributes.normal;
   for (let vi = 0; vi < roadPos.count; vi++) {
     const vz = roadPos.getZ(vi) + z;
+    const localX = roadPos.getX(vi);
+    const centerX = getRoadCenterX(vz);
+    roadPos.setX(vi, localX + centerX);
     roadPos.setY(vi, getRoadHeight(vz));
-    // 해석적 법선 (세그먼트 경계에서도 동일 = 이음새 제거)
+    // 해석적 법선
     const dz = 0.5;
     const dy = (getRoadHeight(vz + dz) - getRoadHeight(vz - dz)) / (2 * dz);
     const nLen = Math.sqrt(1 + dy * dy);
@@ -692,7 +709,7 @@ function createSegment(z) {
     const localY = getRoadHeight(localZ) + 0.05;
     const nextY = getRoadHeight(localZ + 1.5) + 0.05;
     const dash = box(0.2, 0.03, 1.5, 0xFFD600);
-    dash.position.set(0, (localY + nextY) / 2, localZ + 0.75);
+    dash.position.set(getRoadCenterX(localZ + 0.75), (localY + nextY) / 2, localZ + 0.75);
     dash.rotation.x = -Math.atan2(nextY - localY, 1.5);
     seg.add(dash);
   }
@@ -705,6 +722,8 @@ function createSegment(z) {
     const eNormal = edgeGeom.attributes.normal;
     for (let vi = 0; vi < ePos.count; vi++) {
       const vz = ePos.getZ(vi) + z;
+      const localX = ePos.getX(vi);
+      ePos.setX(vi, localX + getRoadCenterX(vz));
       ePos.setY(vi, getRoadHeight(vz) + 0.08);
       const dz = 0.5;
       const dy = (getRoadHeight(vz + dz) - getRoadHeight(vz - dz)) / (2 * dz);
@@ -729,9 +748,14 @@ function createSegment(z) {
     const colors = [];
 
     for (let vi = 0; vi < pos.count; vi++) {
-      const vx = pos.getX(vi) + sideX * 21;
+      const localX = pos.getX(vi);
       const vz = pos.getZ(vi) + z;
-      const h = getSideHeight(vx, vz);
+      const centerX = getRoadCenterX(vz);
+      const vx = localX + sideX * 21 + centerX;
+      pos.setX(vi, localX + centerX); // 도로 커브 따라감
+      // getSideHeight는 도로로부터 거리 기준 - 절대 x 대신 상대 x 사용
+      const relX = sideX * 21 + localX; // 도로 중심 기준 상대 X
+      const h = getRoadHeight(vz) + Math.max(0, Math.abs(relX) - 6) * 0.3 + Math.max(0, fbm(vx, vz, 4, MAP_CONFIG[selectedMap].sideFreq, MAP_CONFIG[selectedMap].sideAmp)) * Math.min(1, (Math.abs(relX)-6)/5) * Math.min(1, (Math.abs(relX)-6)/5);
       pos.setY(vi, h);
 
       // 높이 기반 컬러링
@@ -821,11 +845,11 @@ function createSegment(z) {
       let obs;
       if (type < 0.5) {
         obs = box(0.5, 1, 0.5, 0xFB8C00);
-        obs.position.set(ox, getRoadHeight(oz) + 0.5, oz);
+        obs.position.set(ox + getRoadCenterX(oz), getRoadHeight(oz) + 0.5, oz);
       } else {
         const carColor = [0xE53935,0x1E88E5,0xFFD600,0x43A047,0xFFFFFF,0x333333][Math.floor(Math.random()*6)];
         obs = box(1.4, 1, 2.4, carColor);
-        obs.position.set(ox, getRoadHeight(oz) + 0.5, oz);
+        obs.position.set(ox + getRoadCenterX(oz), getRoadHeight(oz) + 0.5, oz);
         const roof = box(1.2, 0.5, 1.2, carColor); roof.position.y = 0.7; obs.add(roof);
         for (const wx of [-0.6,0.6]) for (const wz of [-0.8,0.8]) {
           const w = box(0.2,0.4,0.4, 0x222222); w.position.set(wx,-0.3,wz); obs.add(w);
@@ -874,7 +898,7 @@ function createSegment(z) {
       rampSize = 'L';
     }
 
-    ramp.position.set(rx, getRoadHeight(rz) + ramp.geometry.parameters.height / 2, rz);
+    ramp.position.set(rx + getRoadCenterX(rz), getRoadHeight(rz) + ramp.geometry.parameters.height / 2, rz);
     ramp.castShadow = true;
     ramp.userData.isRamp = true;
     ramp.userData.hw = ramp.geometry.parameters.width / 2 + 0.3;
@@ -890,7 +914,7 @@ function createSegment(z) {
     for (let i = 0; i < coinCount; i++) {
       const coin = box(0.4, 0.4, 0.4, 0xFFD600);
       const coinZ = z + i * 2.5 - coinCount;
-      coin.position.set(cx, getRoadHeight(coinZ) + 1.2, coinZ);
+      coin.position.set(cx + getRoadCenterX(coinZ), getRoadHeight(coinZ) + 1.2, coinZ);
       coin.rotation.y = 0.785;
       coin.castShadow = true;
       coin.userData.isCoin = true;
@@ -934,11 +958,12 @@ function updateTrack() {
 // ============================================================
 function checkCollision() {
   const bw = 0.5, bd = 0.9;
+  const myX = bikeX + getRoadCenterX(bikeZ);
   for (const obs of obstacles) {
     if (!obs.userData.isObstacle) continue;
     const wp = new THREE.Vector3();
     obs.getWorldPosition(wp);
-    if (Math.abs(bikeX - wp.x) < bw + obs.userData.hw &&
+    if (Math.abs(myX - wp.x) < bw + obs.userData.hw &&
         Math.abs(bikeZ - wp.z) < bd + obs.userData.hd) {
       return true;
     }
@@ -1389,7 +1414,7 @@ function gameLoop() {
   for (const ramp of ramps) {
     if (!ramp.parent) continue;
     const wp = new THREE.Vector3(); ramp.getWorldPosition(wp);
-    if (Math.abs(bikeX - wp.x) < ramp.userData.hw &&
+    if (Math.abs((bikeX + getRoadCenterX(bikeZ)) - wp.x) < ramp.userData.hw &&
         Math.abs(bikeZ - wp.z) < ramp.userData.hd && !isJumping && jumpY === 0 && effSpeed > 10) {
       isJumping = true;
       backflipActive = true;
@@ -1590,10 +1615,12 @@ function gameLoop() {
   }
 
   // 바이크 위치/회전
-  // 도로 높이 = 실제 도로 메시와 정확히 일치 (보간 없음)
+  // 도로 높이 = 실제 도로 메시와 정확히 일치
   const roadHeight = getRoadHeight(bikeZ);
+  const roadCenterX = getRoadCenterX(bikeZ);
   window._smoothRoadH = roadHeight;
-  bike.position.set(bikeX, roadHeight + jumpY, bikeZ);
+  // 바이크 X = 도로 커브 + 라이더 횡방향 오프셋
+  bike.position.set(bikeX + roadCenterX, roadHeight + jumpY, bikeZ);
   if (inAirStunt) {
     // 공중: 스턴트 회전 (양수=백플립, 음수=리버스)
     bike.rotation.x = -backflipAngle * Math.PI / 180;
@@ -1661,7 +1688,7 @@ function gameLoop() {
     // 코인 회전 애니메이션
     c.rotation.y += 3 * dt;
     const wp = new THREE.Vector3(); c.getWorldPosition(wp);
-    if (Math.abs(bikeX - wp.x) < 1 && Math.abs(bikeZ - wp.z) < 1.5) {
+    if (Math.abs((bikeX + getRoadCenterX(bikeZ)) - wp.x) < 1 && Math.abs(bikeZ - wp.z) < 1.5) {
       score += 100;
       c.parent.remove(c);
       coins.splice(i, 1);
@@ -1700,7 +1727,7 @@ function gameLoop() {
     // 가끔 윌리
     ai.wheelieAngle = Math.sin(ai.wobbleTimer * 0.3) * 15 + 10;
 
-    ai.group.position.set(ai.x, getRoadHeight(ai.z), ai.z);
+    ai.group.position.set(ai.x + getRoadCenterX(ai.z), getRoadHeight(ai.z), ai.z);
     ai.group.rotation.x = -ai.wheelieAngle * Math.PI / 180;
   }
   } // end if !isMultiplayer
@@ -1725,15 +1752,15 @@ function gameLoop() {
     camera.position.x += (cinX - camera.position.x) * 5 * dt;
     camera.position.y += (cinY - camera.position.y) * 5 * dt;
     camera.position.z += (cinZ - camera.position.z) * 8 * dt;
-    camera.lookAt(bikeX, roadHeight + jumpY + 1, bikeZ);
+    camera.lookAt(bikeX + roadCenterX, roadHeight + jumpY + 1, bikeZ);
   } else if (tauntLookBack) {
     // 뻐큐: 라이더 머리 위치에서 뒤를 봄 (3인칭 헤드캠)
     const headY = roadHeight + 2.8 + jumpY;
     const headZ = bikeZ - 0.2;
     camera.position.z = headZ;
-    camera.position.x += (bikeX - camera.position.x) * 12 * dt;
+    camera.position.x += (bikeX + roadCenterX - camera.position.x) * 12 * dt;
     camera.position.y += (headY - camera.position.y) * 12 * dt;
-    camera.lookAt(bikeX, roadHeight + 2, bikeZ - 40);  // 뒤를 봄
+    camera.lookAt(bikeX + roadCenterX, roadHeight + 2, bikeZ - 40);  // 뒤를 봄
   } else {
     // 1인칭 (바이크에 고정)
     // 윌리 각도에 비례해서 카메라가 위를 봄
@@ -1741,7 +1768,7 @@ function gameLoop() {
     const fpY = 2.2 + roadHeight + jumpY + Math.sin(wheelieRad) * 2.0;
     camera.position.z = bikeZ + 0.3;
     camera.position.y = fpY;  // 도로와 즉시 동기 (어긋남 방지)
-    camera.position.x += (bikeX - camera.position.x) * 20 * dt;
+    camera.position.x += (bikeX + roadCenterX - camera.position.x) * 20 * dt;
 
     // 앞쪽 도로 방향으로 시선 고정 (내리막/오르막 자동 적용)
     const wRatio = wheelieAngle / 90;
@@ -1749,7 +1776,7 @@ function gameLoop() {
     const forwardRoadH = getRoadHeight(lookZ);
     // 윌리 각도에 따라 하늘로 시선 올림 (도로 높이 + 윌리 보정)
     const lookY = forwardRoadH + 1.5 + wRatio * wRatio * 60;
-    camera.lookAt(bikeX, lookY, lookZ);
+    camera.lookAt(bikeX + getRoadCenterX(lookZ), lookY, lookZ);
   }
 
   // 핸들바 스티어링 회전
@@ -2268,7 +2295,7 @@ function restartRace() {
     ai.z = -5 - i * 3; ai.x = (i-1) * 2.5;
     ai.speed = 14 + Math.random() * 8;
     ai.finished = false; ai.finishTime = 0;
-    ai.group.position.set(ai.x, getRoadHeight(ai.z), ai.z);
+    ai.group.position.set(ai.x + getRoadCenterX(ai.z), getRoadHeight(ai.z), ai.z);
   }
   hudDeath.style.display = 'none';
 }
