@@ -1590,13 +1590,9 @@ function gameLoop() {
   }
 
   // 바이크 위치/회전
-  // 도로 높이 + 점프 높이 (부드럽게 보간해서 꺼짐 방지)
-  const targetRoadH = getRoadHeight(bikeZ);
-  if (typeof window._smoothRoadH === 'undefined') window._smoothRoadH = targetRoadH;
-  // 보간 거의 즉시 (땅 뚫기 방지)
-  const smoothFactor = Math.min(1, 40 * dt);
-  window._smoothRoadH += (targetRoadH - window._smoothRoadH) * smoothFactor;
-  const roadHeight = window._smoothRoadH;
+  // 도로 높이 = 실제 도로 메시와 정확히 일치 (보간 없음)
+  const roadHeight = getRoadHeight(bikeZ);
+  window._smoothRoadH = roadHeight;
   bike.position.set(bikeX, roadHeight + jumpY, bikeZ);
   if (inAirStunt) {
     // 공중: 스턴트 회전 (양수=백플립, 음수=리버스)
@@ -1744,8 +1740,8 @@ function gameLoop() {
     const wheelieRad = wheelieAngle * Math.PI / 180;
     const fpY = 2.2 + roadHeight + jumpY + Math.sin(wheelieRad) * 2.0;
     camera.position.z = bikeZ + 0.3;
+    camera.position.y = fpY;  // 도로와 즉시 동기 (어긋남 방지)
     camera.position.x += (bikeX - camera.position.x) * 20 * dt;
-    camera.position.y += (fpY - camera.position.y) * 25 * dt;
 
     // 앞쪽 도로 방향으로 시선 고정 (내리막/오르막 자동 적용)
     const wRatio = wheelieAngle / 90;
