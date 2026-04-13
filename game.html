@@ -160,6 +160,28 @@
 </div>
 
 <!-- 시작 화면 -->
+<!-- 대기실 (멀티플레이) -->
+<div id="waiting-room" style="
+  position:fixed;inset:0;z-index:180;background:#1a1a2e;
+  display:none;flex-direction:column;align-items:center;justify-content:center;
+  font-family:'Press Start 2P',monospace;color:#fff;text-align:center;">
+  <h2 style="font-size:20px;color:#FFD600;margin-bottom:16px;">WAITING ROOM</h2>
+  <div id="wr-code" style="font-size:14px;color:#4CAF50;margin-bottom:8px;"></div>
+  <div style="font-size:9px;color:#666;margin-bottom:16px;">Share link: <span id="wr-link" style="color:#85D2FE;cursor:pointer;user-select:all" onclick="copyRoomLink()">copying...</span></div>
+
+  <div style="font-size:10px;color:#888;margin-bottom:8px;">PICK YOUR COLOR:</div>
+  <div id="wr-colors" style="display:flex;gap:6px;margin-bottom:20px;flex-wrap:wrap;justify-content:center;max-width:500px;"></div>
+
+  <div style="font-size:10px;color:#888;margin-bottom:8px;">PLAYERS:</div>
+  <div id="wr-players" style="min-width:300px;margin-bottom:24px;"></div>
+
+  <div style="display:flex;gap:10px;">
+    <button id="wr-start-btn" onclick="hostStartGame()" style="font-family:'Press Start 2P',monospace;font-size:12px;padding:14px 30px;background:#E53935;color:#fff;border:none;cursor:pointer;display:none;">START GAME</button>
+    <button onclick="leaveRoom()" style="font-family:'Press Start 2P',monospace;font-size:10px;padding:12px 20px;background:#333366;color:#fff;border:none;cursor:pointer;">LEAVE</button>
+  </div>
+  <div id="wr-wait-msg" style="font-size:9px;color:#666;margin-top:12px;display:none;">WAITING FOR HOST TO START...</div>
+</div>
+
 <!-- 맵 선택 화면 -->
 <div id="map-screen" style="
   position:fixed;inset:0;z-index:150;background:#1a1a2e;
@@ -381,12 +403,27 @@ const AI_COUNT = 3;
 
 // 멀티플레이어
 let peer = null;
-let conn = null;
+let connections = [];
 let isMultiplayer = false;
 let isHost = false;
-let remoteBike = null;
-let remoteRider = null;
-let remoteState = { x:0, z:0, y:0, rotX:0, rotZ:0, speed:0, score:0, dead:false };
+let currentRoomCode = null;
+let myPlayerId = null;
+let myPlayerName = 'Player';
+let myPlayerColor = 0xF95858;
+let players = {};
+let remoteBikes = {};  // peerId -> THREE.Group
+let gameInLobby = false;
+
+const PLAYER_COLORS = [
+  { name:'RED',    color:0xF95858 },
+  { name:'BLUE',   color:0x1E88E5 },
+  { name:'GREEN',  color:0x43A047 },
+  { name:'YELLOW', color:0xFFD600 },
+  { name:'PURPLE', color:0x7E57C2 },
+  { name:'ORANGE', color:0xFB8C00 },
+  { name:'PINK',   color:0xE040A0 },
+  { name:'CYAN',   color:0x26A69A },
+];
 
 // 맵/모드 선택
 let selectedMap = 0;
@@ -552,7 +589,7 @@ function createBike() {
   bikeGroup = new THREE.Group();
 
   // 바이크 본체 (래그돌 시 따로 날아감)
-  bikeBodyGroup = makeBikeModel(0xF95858);
+  bikeBodyGroup = makeBikeModel(myPlayerColor);
   bikeGroup.add(bikeBodyGroup);
 
   // 라이더 (래그돌 시 따로 날아감)
@@ -625,34 +662,37 @@ function createAIRacers() {
 // ============================================================
 
 // 도로 높이 가져오기 (노이즈 기반)
+// 완전 평지
 function getRoadHeight(z) {
-  const cfg = MAP_CONFIG[selectedMap] || MAP_CONFIG[0];
-  const dir = selectedMode === 'uphill' ? 1 : -1;
-
-  // 1. 기본 경사 (업힐/다운힐)
-  const slopeGrade = 0.012 * (cfg.hillAmp / 10);
-  const slope = z * slopeGrade * dir;
-
-  // 2. 부드러운 롤링힐
-  const roll1 = Math.sin(z * 0.008) * cfg.hillAmp * 0.15;
-  const roll2 = Math.sin(z * 0.025) * cfg.hillAmp * 0.05;
-
-  // 3. 울퉁불퉁 구간 (200m마다 50m 구간)
-  const bumpCycle = ((z % 200) + 200) % 200;
-  let bumps = 0;
-  if (bumpCycle > 150) {
-    const bumpT = (bumpCycle - 150) / 50;
-    const envelope = Math.sin(bumpT * Math.PI); // 부드럽게 페이드인/아웃
-    bumps = Math.sin(z * 0.8) * envelope * 0.3 + Math.sin(z * 1.5) * envelope * 0.15;
-  }
-
-  return slope + roll1 + roll2 + bumps;
+  return 0;
 }
 
-// 도로 중심 X 오프셋 (좌우 휘어짐)
+// 도로 중심 X - 완만한 커브 + 급커브 + 유턴 구간
 function getRoadCenterX(z) {
-  // 긴 곡선 + 중간 곡선 조합
-  return Math.sin(z * 0.006) * 20 + Math.sin(z * 0.02) * 5;
+  // 기본 완만한 커브
+  const gentle = Math.sin(z * 0.004) * 15;
+  // 중간 커브
+  const medium = Math.sin(z * 0.015) * 6;
+
+  // 급커브 구간 (400m 주기로 100m 구간)
+  const sharpCycle = ((z % 400) + 400) % 400;
+  let sharp = 0;
+  if (sharpCycle > 300) {
+    const t = (sharpCycle - 300) / 100;
+    const envelope = Math.sin(t * Math.PI);
+    sharp = Math.sin(z * 0.05) * envelope * 25;
+  }
+
+  // 유턴 구간 (800m 주기로 200m 구간)
+  const turnCycle = ((z % 800) + 800) % 800;
+  let uturn = 0;
+  if (turnCycle > 600) {
+    const t = (turnCycle - 600) / 200;
+    // 급격한 S커브 한번
+    uturn = Math.sin(t * Math.PI * 2) * 60;
+  }
+
+  return gentle + medium + sharp + uturn;
 }
 
 // 사이드 터레인 높이 (도로 바깥 - 도로 가장자리에서 부드럽게 연결)
@@ -751,29 +791,11 @@ function createSegment(z) {
       const localX = pos.getX(vi);
       const vz = pos.getZ(vi) + z;
       const centerX = getRoadCenterX(vz);
-      const vx = localX + sideX * 21 + centerX;
-      pos.setX(vi, localX + centerX); // 도로 커브 따라감
-      // getSideHeight는 도로로부터 거리 기준 - 절대 x 대신 상대 x 사용
-      const relX = sideX * 21 + localX; // 도로 중심 기준 상대 X
-      const h = getRoadHeight(vz) + Math.max(0, Math.abs(relX) - 6) * 0.3 + Math.max(0, fbm(vx, vz, 4, MAP_CONFIG[selectedMap].sideFreq, MAP_CONFIG[selectedMap].sideAmp)) * Math.min(1, (Math.abs(relX)-6)/5) * Math.min(1, (Math.abs(relX)-6)/5);
-      pos.setY(vi, h);
-
-      // 높이 기반 컬러링
-      const relH = h - roadY;
-      let r, g, b;
-      if (relH < cfg.snowLine * 0.3) {
-        // 풀
-        const c = new THREE.Color(cfg.grassColor);
-        r = c.r; g = c.g; b = c.b;
-      } else if (relH < cfg.snowLine * 0.6) {
-        // 바위/흙
-        const c = new THREE.Color(cfg.sideColor);
-        r = c.r; g = c.g; b = c.b;
-      } else {
-        // 눈
-        r = 0.93; g = 0.95; b = 0.97;
-      }
-      colors.push(r, g, b);
+      pos.setX(vi, localX + centerX);
+      pos.setY(vi, 0); // 평지
+      // 단색 (맵 grass 색)
+      const c = new THREE.Color(cfg.grassColor);
+      colors.push(c.r, c.g, c.b);
     }
 
     geom.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
@@ -789,9 +811,11 @@ function createSegment(z) {
   const objCount = Math.floor(Math.random() * 4) + 1;
   for (let i = 0; i < objCount; i++) {
     const side = Math.random() > 0.5 ? 1 : -1;
-    const tx = side * (8 + Math.random() * 10);
+    const relTx = side * (8 + Math.random() * 10); // 도로 중심 기준 상대 X
     const tz = z + (Math.random() - 0.5) * SEG_LEN * 0.8;
-    const th = getSideHeight(tx, tz);
+    const tx = relTx + getRoadCenterX(tz); // 도로 커브 반영
+    // 평지에서 나무 바닥 기준은 도로 높이와 동일 (0)
+    const th = 0;
 
     if (cfg.treeType === 'oak') {
       // 참나무
@@ -978,52 +1002,37 @@ function checkCollision() {
 // ============================================================
 //  MULTIPLAYER (PeerJS)
 // ============================================================
-function createRemoteBike() {
-  const group = new THREE.Group();
-  group.add(makeBikeModel(0x1E88E5));  // 파란 바이크 (상대방)
-  group.add(makeRiderModel(0xFB8C00, 0x1E88E5));  // 주황 셔츠, 파란 헬멧
-  scene.add(group);
-  remoteBike = group;
-}
-
 function sendState() {
-  if (!conn || !conn.open) return;
-  conn.send({
+  if (!isMultiplayer || gameInLobby) return;
+  const msg = {
     type: 'state',
-    x: bikeX,
-    z: bikeZ,
-    y: (window._smoothRoadH || 0) + jumpY,
+    id: myPlayerId,
+    x: bike.position.x,
+    y: bike.position.y,
+    z: bike.position.z,
     rotX: bike.rotation.x,
     rotZ: bike.rotation.z,
     speed: speed,
     score: score,
     dead: isDead,
-  });
-}
-
-function onRemoteData(data) {
-  if (data.type === 'state') {
-    remoteState = data;
+  };
+  if (isHost) {
+    // 호스트는 모두에게
+    broadcast(msg);
+  } else {
+    // 클라이언트는 호스트에게 (호스트가 다른 클라이언트에게 중계)
+    sendToHost(msg);
   }
 }
 
-function updateRemoteBike(dt) {
-  if (!remoteBike || !isMultiplayer) return;
-  // 부드럽게 보간
-  remoteBike.position.x += (remoteState.x - remoteBike.position.x) * 8 * dt;
-  remoteBike.position.y += (remoteState.y - remoteBike.position.y) * 8 * dt;
-  remoteBike.position.z += (remoteState.z - remoteBike.position.z) * 10 * dt;
-  remoteBike.rotation.x += (remoteState.rotX - remoteBike.rotation.x) * 8 * dt;
-  remoteBike.rotation.z += (remoteState.rotZ - remoteBike.rotation.z) * 8 * dt;
-  remoteBike.visible = !remoteState.dead;
-}
-
-function setupConnection(connection) {
-  conn = connection;
-  conn.on('data', onRemoteData);
-  conn.on('close', () => {
-    document.getElementById('lobby-status').textContent = 'DISCONNECTED';
-    isMultiplayer = false;
+function updateAllRemoteBikes(dt) {
+  Object.values(remoteBikes).forEach(g => {
+    if (!g.userData || g.userData.targetX === undefined) return;
+    g.position.x += (g.userData.targetX - g.position.x) * 10 * dt;
+    g.position.y += (g.userData.targetY - g.position.y) * 10 * dt;
+    g.position.z += (g.userData.targetZ - g.position.z) * 12 * dt;
+    g.rotation.x += (g.userData.targetRotX - g.rotation.x) * 10 * dt;
+    g.rotation.z += (g.userData.targetRotZ - g.rotation.z) * 10 * dt;
   });
 }
 
@@ -1060,38 +1069,149 @@ const iceConfig = {
   ]
 };
 
+// === 대기실 UI 렌더링 ===
+function renderWaitingRoom() {
+  // 방 코드
+  document.getElementById('wr-code').textContent = `ROOM: ${currentRoomCode || '-'}`;
+  // URL
+  const url = `${location.origin}${location.pathname}?room=${currentRoomCode}`;
+  document.getElementById('wr-link').textContent = url;
+
+  // 색상 버튼
+  const takenColors = new Set(Object.values(players).map(p => p.color));
+  const colorsDiv = document.getElementById('wr-colors');
+  colorsDiv.innerHTML = '';
+  PLAYER_COLORS.forEach((c) => {
+    const btn = document.createElement('div');
+    const isMine = myPlayerColor === c.color;
+    const isTaken = takenColors.has(c.color) && !isMine;
+    btn.style.cssText = `width:36px;height:36px;background:#${c.color.toString(16).padStart(6,'0')};cursor:${isTaken?'not-allowed':'pointer'};border:3px solid ${isMine?'#fff':'#333'};opacity:${isTaken?0.3:1};`;
+    btn.title = c.name;
+    if (!isTaken) btn.onclick = () => selectColor(c.color);
+    colorsDiv.appendChild(btn);
+  });
+
+  // 플레이어 목록
+  const listDiv = document.getElementById('wr-players');
+  listDiv.innerHTML = '';
+  Object.entries(players).forEach(([pid, p]) => {
+    const row = document.createElement('div');
+    const isHostPlayer = pid === window._hostId;
+    row.style.cssText = `display:flex;align-items:center;gap:10px;padding:6px 12px;background:#222244;margin:4px 0;`;
+    row.innerHTML = `
+      <div style="width:16px;height:16px;background:#${p.color.toString(16).padStart(6,'0')};"></div>
+      <div style="font-size:10px;color:#fff;">${p.name}${pid === myPlayerId ? ' (YOU)' : ''}${isHostPlayer ? ' 👑' : ''}</div>
+    `;
+    listDiv.appendChild(row);
+  });
+
+  // 시작 버튼 표시 (호스트만)
+  document.getElementById('wr-start-btn').style.display = isHost ? 'block' : 'none';
+  document.getElementById('wr-wait-msg').style.display = isHost ? 'none' : 'block';
+}
+
+function selectColor(color) {
+  // 이미 사용 중인지 체크
+  const taken = Object.values(players).some(p => p !== players[myPlayerId] && p.color === color);
+  if (taken) return;
+  myPlayerColor = color;
+  if (players[myPlayerId]) players[myPlayerId].color = color;
+  // 브로드캐스트
+  broadcast({ type: 'colorChange', id: myPlayerId, color });
+  renderWaitingRoom();
+}
+
+function broadcast(msg) {
+  connections.forEach(c => { if (c && c.open) c.send(msg); });
+}
+
+function sendToHost(msg) {
+  if (connections[0] && connections[0].open) connections[0].send(msg);
+}
+
+function copyRoomLink() {
+  const url = `${location.origin}${location.pathname}?room=${currentRoomCode}`;
+  navigator.clipboard.writeText(url).then(() => {
+    const el = document.getElementById('wr-link');
+    const orig = el.textContent;
+    el.textContent = 'COPIED!';
+    setTimeout(() => { el.textContent = orig; }, 1500);
+  });
+}
+
+function leaveRoom() {
+  if (peer) peer.destroy();
+  peer = null;
+  connections = [];
+  players = {};
+  isMultiplayer = false;
+  isHost = false;
+  currentRoomCode = null;
+  // URL 정리
+  history.replaceState(null, '', location.pathname);
+  document.getElementById('waiting-room').style.display = 'none';
+  document.getElementById('lobby-screen').style.display = 'flex';
+}
+
+// === 호스트: 방 만들기 ===
 function createRoom() {
   const status = document.getElementById('lobby-status');
   status.textContent = 'CREATING ROOM...';
-
-  const roomCode = genRoomCode();
-  peer = new Peer('wheelie-' + roomCode, { config: iceConfig });
+  currentRoomCode = genRoomCode();
+  peer = new Peer('wheelie-' + currentRoomCode, { config: iceConfig });
   isHost = true;
 
-  peer.on('open', () => {
-    status.innerHTML = `ROOM CODE: <span style="color:#FFD600;font-size:20px">${roomCode}</span><br><br>WAITING FOR PLAYER...<br><span style="font-size:8px;color:#666">Share this code with your friend!</span>`;
+  peer.on('open', (id) => {
+    myPlayerId = id;
+    window._hostId = id;
+    // 자기 자신 등록
+    players[id] = { name: myPlayerName, color: myPlayerColor };
+    // URL 업데이트
+    history.replaceState(null, '', `${location.pathname}?room=${currentRoomCode}`);
+    // 대기실로
+    document.getElementById('lobby-screen').style.display = 'none';
+    document.getElementById('waiting-room').style.display = 'flex';
+    isMultiplayer = true;
+    gameInLobby = true;
+    renderWaitingRoom();
   });
 
   peer.on('connection', (connection) => {
-    setupConnection(connection);
-    isMultiplayer = true;
-    status.textContent = 'PLAYER JOINED! STARTING...';
-    createRemoteBike();
-
-    setTimeout(() => {
-      document.getElementById('lobby-screen').style.display = 'none';
-      document.getElementById('map-screen').style.display = 'flex';
-    }, 1000);
+    connections.push(connection);
+    connection.on('open', () => {
+      // 새 플레이어 등록
+      players[connection.peer] = { name: 'Player', color: 0xCCCCCC };
+      // 현재 상태 전송 (플레이어 목록, 호스트 ID)
+      connection.send({ type: 'welcome', hostId: myPlayerId, players });
+      // 다른 플레이어에게 알림
+      broadcast({ type: 'playerJoined', id: connection.peer, player: players[connection.peer] });
+      renderWaitingRoom();
+    });
+    connection.on('data', (data) => handleHostData(connection, data));
+    connection.on('close', () => {
+      connections = connections.filter(c => c !== connection);
+      delete players[connection.peer];
+      // 원격 바이크 삭제
+      if (remoteBikes[connection.peer]) {
+        scene.remove(remoteBikes[connection.peer]);
+        delete remoteBikes[connection.peer];
+      }
+      broadcast({ type: 'playerLeft', id: connection.peer });
+      renderWaitingRoom();
+    });
   });
 
   peer.on('error', (err) => {
     status.textContent = 'ERROR: ' + err.type;
+    console.error(err);
   });
 }
 
-function joinRoom() {
-  const code = document.getElementById('room-input').value.trim().toUpperCase();
+// === 클라이언트: 방 참가 ===
+function joinRoom(codeOverride) {
+  const code = (codeOverride || document.getElementById('room-input').value.trim().toUpperCase());
   if (!code) return;
+  currentRoomCode = code;
 
   const status = document.getElementById('lobby-status');
   status.textContent = 'CONNECTING...';
@@ -1099,18 +1219,22 @@ function joinRoom() {
   peer = new Peer(undefined, { config: iceConfig });
   isHost = false;
 
-  peer.on('open', () => {
+  peer.on('open', (id) => {
+    myPlayerId = id;
     const connection = peer.connect('wheelie-' + code);
-    connection.on('open', () => {
-      setupConnection(connection);
-      isMultiplayer = true;
-      createRemoteBike();
-      status.textContent = 'CONNECTED!';
+    connections.push(connection);
 
-      setTimeout(() => {
-        document.getElementById('lobby-screen').style.display = 'none';
-        document.getElementById('map-screen').style.display = 'flex';
-      }, 1000);
+    connection.on('open', () => {
+      isMultiplayer = true;
+      gameInLobby = true;
+      // 내 정보 전송
+      connection.send({ type: 'hello', id: myPlayerId, name: myPlayerName, color: myPlayerColor });
+    });
+    connection.on('data', (data) => handleClientData(data));
+    connection.on('close', () => {
+      // 호스트 나감 → 방 나가기
+      alert('Host disconnected');
+      leaveRoom();
     });
     connection.on('error', () => {
       status.textContent = 'FAILED TO CONNECT';
@@ -1120,6 +1244,86 @@ function joinRoom() {
   peer.on('error', (err) => {
     status.textContent = 'ERROR: ' + err.type;
   });
+}
+
+// 호스트가 받는 데이터 처리
+function handleHostData(connection, data) {
+  if (data.type === 'hello') {
+    players[data.id] = { name: data.name || 'Player', color: data.color || 0xCCCCCC };
+    broadcast({ type: 'playersUpdate', players });
+    renderWaitingRoom();
+  } else if (data.type === 'colorChange') {
+    if (players[data.id]) players[data.id].color = data.color;
+    broadcast({ type: 'playersUpdate', players });
+    renderWaitingRoom();
+  } else if (data.type === 'state') {
+    // 다른 플레이어에게 중계
+    data.id = connection.peer;
+    connections.forEach(c => { if (c !== connection && c.open) c.send(data); });
+    // 로컬 원격 바이크 업데이트
+    updateRemotePlayer(connection.peer, data);
+  }
+}
+
+// 클라이언트가 받는 데이터 처리
+function handleClientData(data) {
+  if (data.type === 'welcome') {
+    window._hostId = data.hostId;
+    players = data.players || {};
+    // 내 정보 추가
+    players[myPlayerId] = { name: myPlayerName, color: myPlayerColor };
+    document.getElementById('lobby-screen').style.display = 'none';
+    document.getElementById('waiting-room').style.display = 'flex';
+    renderWaitingRoom();
+  } else if (data.type === 'playersUpdate') {
+    players = data.players;
+    renderWaitingRoom();
+  } else if (data.type === 'playerJoined') {
+    players[data.id] = data.player;
+    renderWaitingRoom();
+  } else if (data.type === 'playerLeft') {
+    delete players[data.id];
+    if (remoteBikes[data.id]) {
+      scene.remove(remoteBikes[data.id]);
+      delete remoteBikes[data.id];
+    }
+    renderWaitingRoom();
+  } else if (data.type === 'startGame') {
+    selectedMap = data.map;
+    selectedMode = data.mode;
+    document.getElementById('waiting-room').style.display = 'none';
+    document.getElementById('start-screen').style.display = 'flex';
+    gameInLobby = false;
+  } else if (data.type === 'state') {
+    updateRemotePlayer(data.id, data);
+  }
+}
+
+function updateRemotePlayer(pid, data) {
+  if (!remoteBikes[pid]) {
+    const p = players[pid] || { color: 0x1E88E5 };
+    const g = new THREE.Group();
+    g.add(makeBikeModel(p.color));
+    g.add(makeRiderModel(0x1E88E5, p.color));
+    scene.add(g);
+    remoteBikes[pid] = g;
+  }
+  const g = remoteBikes[pid];
+  g.userData.targetX = data.x;
+  g.userData.targetY = data.y;
+  g.userData.targetZ = data.z;
+  g.userData.targetRotX = data.rotX;
+  g.userData.targetRotZ = data.rotZ;
+  g.visible = !data.dead;
+}
+
+// === 호스트가 게임 시작 (대기실에서) ===
+function hostStartGame() {
+  // 맵/모드 선택으로 이동
+  document.getElementById('waiting-room').style.display = 'none';
+  document.getElementById('map-screen').style.display = 'flex';
+  // 맵 선택 완료 후 startGame 자체에서 브로드캐스트하도록
+  window._pendingStart = true;
 }
 
 function initMediaPipe() {
@@ -2103,7 +2307,7 @@ function gameLoop() {
   // === 멀티플레이어 동기화 ===
   if (isMultiplayer) {
     sendState();
-    updateRemoteBike(dt);
+    updateAllRemoteBikes(dt);
   }
 
   renderer.render(scene, camera);
@@ -2303,6 +2507,12 @@ function restartRace() {
 function startGame() {
   document.getElementById('start-screen').style.display = 'none';
 
+  // 멀티: 호스트가 게임 시작하면 모두에게 브로드캐스트
+  if (isMultiplayer && isHost) {
+    broadcast({ type: 'startGame', map: selectedMap, mode: selectedMode });
+  }
+  gameInLobby = false;
+
   // 맵 설정 적용
   const cfg = MAP_CONFIG[selectedMap] || MAP_CONFIG[0];
   scene.background = new THREE.Color(cfg.skyColor);
@@ -2338,6 +2548,18 @@ window.startGame = startGame;
 window.selectMap = selectMap;
 window.selectMode = selectMode;
 window.restartRace = restartRace;
+window.selectColor = selectColor;
+window.copyRoomLink = copyRoomLink;
+window.leaveRoom = leaveRoom;
+window.hostStartGame = hostStartGame;
+
+// URL에 room 파라미터 있으면 자동 접속
+const urlParams = new URLSearchParams(location.search);
+const urlRoom = urlParams.get('room');
+if (urlRoom) {
+  document.getElementById('lobby-screen').style.display = 'none';
+  setTimeout(() => { joinRoom(urlRoom.toUpperCase()); }, 500);
+}
 </script>
 </body>
 </html>
