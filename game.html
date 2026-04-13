@@ -858,12 +858,15 @@ function createSegment(z) {
 
   segCount++;
 
-  // 장애물 (빈도 줄임: 6세그먼트마다 1~2개)
+  // 장애물 (빈도 줄임, 커브 구간 회피)
   if (segCount > 3 && segCount % 6 === 0) {
     const obsCount = Math.floor(Math.random() * 2) + 1;
     for (let i = 0; i < obsCount; i++) {
       const ox = (Math.random() - 0.5) * 9;
       const oz = z + (Math.random() - 0.5) * SEG_LEN * 0.6;
+      // 커브 강도 체크: 도로 방향 변화율
+      const curveDx = (getRoadCenterX(oz + 5) - getRoadCenterX(oz - 5)) / 10;
+      if (Math.abs(curveDx) > 0.25) continue; // 급커브면 장애물 생성 안함
       const type = Math.random();
 
       let obs;
@@ -888,10 +891,15 @@ function createSegment(z) {
     }
   }
 
-  // 점프대 (3세그먼트마다, 3종류)
+  // 점프대 (3세그먼트마다, 커브 회피)
   if (segCount > 2 && segCount % 3 === 0) {
     const rx = (Math.random() - 0.5) * 5;
     const rz = z + (Math.random() - 0.5) * SEG_LEN * 0.3;
+    // 커브 체크
+    const curveDx = (getRoadCenterX(rz + 5) - getRoadCenterX(rz - 5)) / 10;
+    if (Math.abs(curveDx) > 0.2) {
+      // 커브면 점프대 스킵
+    } else {
     const rampType = Math.random();
     let ramp, rampSize;
 
@@ -929,6 +937,7 @@ function createSegment(z) {
     ramp.userData.hd = ramp.geometry.parameters.depth / 2 + 0.3;
     seg.add(ramp);
     ramps.push(ramp);
+    } // end else (not curve)
   }
 
   // 코인 (2세그먼트마다 3~5개 줄)
