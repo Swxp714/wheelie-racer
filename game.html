@@ -1578,7 +1578,8 @@ function gameLoop() {
   // 도로 높이 + 점프 높이 (부드럽게 보간해서 꺼짐 방지)
   const targetRoadH = getRoadHeight(bikeZ);
   if (typeof window._smoothRoadH === 'undefined') window._smoothRoadH = targetRoadH;
-  const smoothFactor = Math.min(1, (20 + speed * 0.3) * dt); // 고속일수록 빠르게 따라감
+  // 보간 거의 즉시 (땅 뚫기 방지)
+  const smoothFactor = Math.min(1, 40 * dt);
   window._smoothRoadH += (targetRoadH - window._smoothRoadH) * smoothFactor;
   const roadHeight = window._smoothRoadH;
   bike.position.set(bikeX, roadHeight + jumpY, bikeZ);
@@ -1724,17 +1725,19 @@ function gameLoop() {
     camera.lookAt(bikeX, roadHeight + 2, bikeZ - 40);  // 뒤를 봄
   } else {
     // 1인칭 (바이크에 고정)
-    // 윌리 각도에 비례해서 카메라가 위를 봄 (자연스러운 라이더 시점)
+    // 윌리 각도에 비례해서 카메라가 위를 봄
     const wheelieRad = wheelieAngle * Math.PI / 180;
     const fpY = 2.2 + roadHeight + jumpY + Math.sin(wheelieRad) * 2.0;
     camera.position.z = bikeZ + 0.3;
-    camera.position.x += (bikeX - camera.position.x) * 12 * dt;
-    camera.position.y += (fpY - camera.position.y) * 12 * dt;
+    camera.position.x += (bikeX - camera.position.x) * 20 * dt;
+    camera.position.y += (fpY - camera.position.y) * 25 * dt;
 
-    // 윌리 각도만큼 하늘을 봄 (실제 라이더가 뒤로 젖혀지는 시점)
-    const wRatio = wheelieAngle / 90; // 0~1
-    const lookY = 1.5 + wRatio * wRatio * 60;  // 0도=1.5, 45도=16, 90도=61 (하늘)
-    const lookZ = bikeZ + 30 - wRatio * 20;    // 윌리할수록 가까이 봄
+    // 앞쪽 도로 방향으로 시선 고정 (내리막/오르막 자동 적용)
+    const wRatio = wheelieAngle / 90;
+    const lookZ = bikeZ + 30 - wRatio * 20;
+    const forwardRoadH = getRoadHeight(lookZ);
+    // 윌리 각도에 따라 하늘로 시선 올림 (도로 높이 + 윌리 보정)
+    const lookY = forwardRoadH + 1.5 + wRatio * wRatio * 60;
     camera.lookAt(bikeX, lookY, lookZ);
   }
 
